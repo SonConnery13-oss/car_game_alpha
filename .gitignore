@@ -1,0 +1,10 @@
+video_frames/
+video_frames_20260512/
+video_frames_dense/
+video_contact_sheet*.jpg
+*.mp4
+*.log
+*.out
+node_modules/
+.env
+.env.*

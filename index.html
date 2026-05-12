@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Three.js Racing Prototype</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+          "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main id="game">
+      <canvas id="gameCanvas" aria-label="3D racing game"></canvas>
+
+      <section id="hud" aria-label="Telemetry">
+        <div class="hud-panel speed-panel">
+          <span>KM/H</span>
+          <strong id="speedValue">000</strong>
+        </div>
+
+        <div class="hud-panel lap-panel">
+          <span>LAP</span>
+          <strong id="lapValue">0</strong>
+          <span>NOW</span>
+          <strong id="currentLapValue">00.000</strong>
+          <span>BEST</span>
+          <strong id="bestLapValue">--.---</strong>
+        </div>
+
+        <div class="hud-panel gear-panel">
+          <span>GEAR</span>
+          <strong id="gearValue">N</strong>
+        </div>
+      </section>
+
+      <button id="startButton" class="icon-button is-running" type="button" aria-label="Pause or resume">
+        <span aria-hidden="true"></span>
+      </button>
+
+      <div id="message" class="message is-visible">READY</div>
+    </main>
+
+    <script type="module" src="./game.js"></script>
+  </body>
+</html>
