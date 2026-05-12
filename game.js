@@ -19,8 +19,8 @@ const TERRAIN_SIZE = 560;
 const TERRAIN_SEGMENTS = 280;
 const TERRAIN_ELEMENT_SIZE = TERRAIN_SIZE / TERRAIN_SEGMENTS;
 const WHEEL_RADIUS = 0.42;
-const SUSPENSION_REST_LENGTH = 0.24;
-const WHEEL_CONNECTION_Y = -0.13;
+const SUSPENSION_REST_LENGTH = 0.27;
+const WHEEL_CONNECTION_Y = -0.16;
 const START_X = TRACK_RADIUS;
 const START_Z = START_LINE_Z - 2;
 const JUMP_RAMPS = [];
@@ -30,6 +30,11 @@ const TEST_AREA = {
   width: 210,
   depth: 104,
 };
+const BRIDGE_ROUTES = [
+  { startX: -74, startZ: 116, endX: -58, endZ: TEST_AREA.z - TEST_AREA.depth / 2 - 1, width: 9.5 },
+  { startX: 6, startZ: 134, endX: 0, endZ: TEST_AREA.z - TEST_AREA.depth / 2 - 1, width: 10.5 },
+  { startX: 72, startZ: 98, endX: 58, endZ: TEST_AREA.z - TEST_AREA.depth / 2 - 1, width: 9.5 },
+];
 const START_GROUND_Y = getTrackElevation(START_X, START_Z);
 const START_HEIGHT = START_GROUND_Y + WHEEL_RADIUS + SUSPENSION_REST_LENGTH - WHEEL_CONNECTION_Y + 0.02;
 const START_POSITION = new CANNON.Vec3(START_X, START_HEIGHT, START_Z);
@@ -439,7 +444,10 @@ function createWorld() {
   createTerrainBody();
   createTrack();
   createStartLine();
+  createLowTrackWalls();
   createScenery();
+  createBridgeRoutes();
+  createGrandstands();
 }
 
 function createSky() {
@@ -770,6 +778,269 @@ function createBarriers() {
   createBarrierLoop(-ROAD_WIDTH / 2 - 1.45, 0xd8dde1);
 }
 
+function createLowTrackWalls() {
+  const wallMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd9ddd8,
+    roughness: 0.48,
+    metalness: 0.12,
+  });
+
+  createLowWallLoop(ROAD_WIDTH / 2 + 1.05, wallMaterial);
+  createLowWallLoop(-ROAD_WIDTH / 2 - 1.05, wallMaterial);
+}
+
+function createLowWallLoop(offset, material) {
+  const segmentStep = 5;
+
+  for (let i = 0; i < trackPoints.length; i += segmentStep) {
+    const a = getOffsetTrackPoint(i, offset);
+    const b = getOffsetTrackPoint((i + segmentStep) % trackPoints.length, offset);
+    const midpoint = a.clone().add(b).multiplyScalar(0.5);
+
+    if (shouldSkipTrackWallSegment(i, midpoint)) continue;
+    createLowWallSegment(a, b, material, 0.52, 0.34);
+  }
+}
+
+function shouldSkipTrackWallSegment(index, midpoint) {
+  const startPoint = trackPoints[0];
+  const nearStartIndex = index < 22 || index > trackPoints.length - 22;
+  const nearStartPosition = midpoint.distanceTo(startPoint) < 30;
+
+  return nearStartIndex || nearStartPosition || isNearBridgeAccess(midpoint.x, midpoint.y, 9);
+}
+
+function createTestAreaLowWalls() {
+  const wallMaterial = new THREE.MeshStandardMaterial({
+    color: 0xdedfd9,
+    roughness: 0.5,
+    metalness: 0.08,
+  });
+  const halfWidth = TEST_AREA.width / 2;
+  const halfDepth = TEST_AREA.depth / 2;
+  const zSouth = TEST_AREA.z - halfDepth - 0.7;
+  const zNorth = TEST_AREA.z + halfDepth + 0.7;
+  const xWest = TEST_AREA.x - halfWidth - 0.7;
+  const xEast = TEST_AREA.x + halfWidth + 0.7;
+
+  createLowWallSegment(
+    new THREE.Vector2(xWest, zNorth),
+    new THREE.Vector2(xEast, zNorth),
+    wallMaterial,
+    0.54,
+    0.36,
+  );
+  createLowWallSegment(
+    new THREE.Vector2(xWest, zSouth),
+    new THREE.Vector2(xWest, zNorth),
+    wallMaterial,
+    0.54,
+    0.36,
+  );
+  createLowWallSegment(
+    new THREE.Vector2(xEast, zSouth),
+    new THREE.Vector2(xEast, zNorth),
+    wallMaterial,
+    0.54,
+    0.36,
+  );
+
+  const openings = BRIDGE_ROUTES
+    .map((route) => ({ min: route.endX - route.width * 1.2, max: route.endX + route.width * 1.2 }))
+    .sort((a, b) => a.min - b.min);
+  let cursor = xWest;
+
+  for (const opening of openings) {
+    const end = Math.max(cursor, opening.min);
+    if (end - cursor > 4) {
+      createLowWallSegment(new THREE.Vector2(cursor, zSouth), new THREE.Vector2(end, zSouth), wallMaterial, 0.54, 0.36);
+    }
+    cursor = Math.max(cursor, opening.max);
+  }
+
+  if (xEast - cursor > 4) {
+    createLowWallSegment(new THREE.Vector2(cursor, zSouth), new THREE.Vector2(xEast, zSouth), wallMaterial, 0.54, 0.36);
+  }
+}
+
+function createBridgeRoutes() {
+  const deckMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4a5050,
+    roughness: 0.72,
+    metalness: 0.04,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+  const railMaterial = new THREE.MeshStandardMaterial({
+    color: 0xcfd3cf,
+    roughness: 0.5,
+    metalness: 0.12,
+  });
+  const stripeMaterial = new THREE.MeshBasicMaterial({
+    color: 0xd92c24,
+    polygonOffset: true,
+    polygonOffsetFactor: -5,
+    polygonOffsetUnits: -5,
+  });
+
+  for (const route of BRIDGE_ROUTES) {
+    createBridgeRibbon(route, deckMaterial, stripeMaterial);
+    createBridgeRails(route, railMaterial);
+  }
+}
+
+function createBridgeRibbon(route, deckMaterial, stripeMaterial) {
+  const start = new THREE.Vector2(route.startX, route.startZ);
+  const end = new THREE.Vector2(route.endX, route.endZ);
+  const direction = end.clone().sub(start).normalize();
+  const normal = new THREE.Vector2(-direction.y, direction.x);
+  const steps = 18;
+  const vertices = [];
+  const uvs = [];
+  const indices = [];
+
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const center = start.clone().lerp(end, t);
+    const width = route.width + Math.sin(t * Math.PI) * 1.2;
+
+    for (let side = -1; side <= 1; side += 2) {
+      const point = center.clone().addScaledVector(normal, side * width / 2);
+      vertices.push(point.x, getTrackElevation(point.x, point.y) + TRACK_SURFACE_OFFSET + 0.12, point.y);
+      uvs.push(side < 0 ? 0 : 1, t * 8);
+    }
+  }
+
+  for (let i = 0; i < steps; i += 1) {
+    const a = i * 2;
+    const b = a + 1;
+    const c = a + 2;
+    const d = a + 3;
+    indices.push(a, c, b, b, c, d);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  const deck = new THREE.Mesh(geometry, deckMaterial);
+  deck.receiveShadow = true;
+  deck.renderOrder = 4;
+  scene.add(deck);
+
+  for (let i = 2; i < steps; i += 4) {
+    const t = i / steps;
+    const center = start.clone().lerp(end, t);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(route.width * 0.66, 0.03, 0.36), stripeMaterial);
+    stripe.position.set(center.x, getTrackElevation(center.x, center.y) + TRACK_SURFACE_OFFSET + 0.17, center.y);
+    stripe.rotation.y = Math.atan2(direction.x, direction.y) + Math.PI / 2;
+    stripe.renderOrder = 8;
+    scene.add(stripe);
+  }
+}
+
+function createBridgeRails(route, material) {
+  const start = new THREE.Vector2(route.startX, route.startZ);
+  const end = new THREE.Vector2(route.endX, route.endZ);
+  const direction = end.clone().sub(start).normalize();
+  const normal = new THREE.Vector2(-direction.y, direction.x);
+
+  for (const side of [-1, 1]) {
+    const railStart = start.clone().addScaledVector(normal, side * (route.width / 2 + 0.55));
+    const railEnd = end.clone().addScaledVector(normal, side * (route.width / 2 + 0.55));
+    createLowWallSegment(railStart, railEnd, material, 0.46, 0.3);
+  }
+}
+
+function createGrandstands() {
+  const standMaterial = new THREE.MeshStandardMaterial({ color: 0xb8bdba, roughness: 0.64, metalness: 0.08 });
+  const seatMaterial = new THREE.MeshStandardMaterial({ color: 0x2f4f6b, roughness: 0.7 });
+  const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x24282b, roughness: 0.52, metalness: 0.2 });
+  const standDefs = [
+    { index: 46, side: 1 },
+    { index: 108, side: -1 },
+    { index: 188, side: 1 },
+    { index: 292, side: -1 },
+  ];
+
+  for (const def of standDefs) {
+    createGrandstand(def.index, def.side, standMaterial, seatMaterial, roofMaterial);
+  }
+}
+
+function createGrandstand(index, side, standMaterial, seatMaterial, roofMaterial) {
+  const point = trackPoints[index % trackPoints.length];
+  const normal = getTrackNormal(index % trackPoints.length);
+  const next = trackPoints[(index + 1) % trackPoints.length];
+  const previous = trackPoints[(index - 1 + trackPoints.length) % trackPoints.length];
+  const tangent = next.clone().sub(previous).normalize();
+  const base = point.clone().addScaledVector(normal, side * (ROAD_WIDTH / 2 + 19));
+
+  if (isNearTrack(base.x, base.y, ROAD_WIDTH + 6) || isNearTestArea(base.x, base.y, 8)) return;
+
+  const yaw = Math.atan2(tangent.x, tangent.y);
+  const groundY = getTrackElevation(base.x, base.y);
+  const stand = new THREE.Group();
+
+  for (let row = 0; row < 5; row += 1) {
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(15, 0.28, 0.8), row % 2 ? seatMaterial : standMaterial);
+    seat.position.set(0, row * 0.42 + 0.24, side * (row * 0.78));
+    seat.castShadow = true;
+    seat.receiveShadow = true;
+    stand.add(seat);
+  }
+
+  const basePlatform = new THREE.Mesh(new THREE.BoxGeometry(16.5, 0.3, 5.2), standMaterial);
+  basePlatform.position.set(0, 0.08, side * 1.6);
+  basePlatform.castShadow = true;
+  basePlatform.receiveShadow = true;
+  stand.add(basePlatform);
+
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(17.5, 0.24, 4.6), roofMaterial);
+  roof.position.set(0, 3.05, side * 1.7);
+  roof.castShadow = true;
+  stand.add(roof);
+
+  for (const x of [-7.2, 7.2]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 3.0, 8), roofMaterial);
+    post.position.set(x, 1.55, side * 0.2);
+    post.castShadow = true;
+    stand.add(post);
+  }
+
+  stand.position.set(base.x, groundY + 0.02, base.y);
+  stand.rotation.y = yaw;
+  scene.add(stand);
+}
+
+function createLowWallSegment(a, b, material, height = 0.52, thickness = 0.34) {
+  const dx = b.x - a.x;
+  const dz = b.y - a.y;
+  const length = Math.hypot(dx, dz) - 0.24;
+
+  if (length < 1.2) return;
+
+  const angle = Math.atan2(-dz, dx);
+  const centerX = (a.x + b.x) / 2;
+  const centerZ = (a.y + b.y) / 2;
+  const groundY = (getTrackElevation(a.x, a.y) + getTrackElevation(b.x, b.y)) / 2;
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, height, thickness), material);
+  mesh.position.set(centerX, groundY + height / 2 + 0.03, centerZ);
+  mesh.rotation.y = angle;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+
+  const body = new CANNON.Body({ mass: 0, material: barrierMaterial });
+  body.position.set(centerX, groundY + height / 2 + 0.03, centerZ);
+  body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
+  body.addShape(new CANNON.Box(new CANNON.Vec3(length / 2, height / 2, thickness / 2)));
+  world.addBody(body);
+}
+
 function createStartLine() {
   const group = new THREE.Group();
   const stripeMaterialA = new THREE.MeshBasicMaterial({ color: 0xf7f7f2 });
@@ -966,6 +1237,7 @@ function createTestArea() {
     { x: TEST_AREA.x + 2, z: TEST_AREA.z + 27, width: 16, length: 42 },
     { x: TEST_AREA.x + 58, z: TEST_AREA.z + 12, width: 12, length: 32 },
   ], redMaterial, whiteMaterial);
+  createTestAreaLowWalls();
 }
 
 function createCurvedRampMarkers(ramps, redMaterial, whiteMaterial) {
@@ -1058,6 +1330,7 @@ function createCityBlocks() {
     for (let z = -142; z <= 142; z += 24) {
       if (isNearTrack(x, z, ROAD_WIDTH + 18)) continue;
       if (isNearTestArea(x, z, 16)) continue;
+      if (isNearBridgeAccess(x, z, 15)) continue;
       if (Math.abs(x) % 40 < 8 || Math.abs(z) % 40 < 8) continue;
 
       const seed = Math.abs(Math.sin(x * 12.9898 + z * 78.233));
@@ -1186,7 +1459,7 @@ function createVehicle() {
   const wheelOptions = {
     radius: WHEEL_RADIUS,
     directionLocal: new CANNON.Vec3(0, -1, 0),
-    suspensionStiffness: 230,
+    suspensionStiffness: 215,
     suspensionRestLength: SUSPENSION_REST_LENGTH,
     frictionSlip: BASE_WHEEL_FRICTION_SLIP,
     dampingRelaxation: DAMPER_SETTINGS.rebound,
@@ -1194,7 +1467,7 @@ function createVehicle() {
     maxSuspensionForce: 170000,
     rollInfluence: 0.00028,
     axleLocal: new CANNON.Vec3(-1, 0, 0),
-    maxSuspensionTravel: 0.09,
+    maxSuspensionTravel: 0.16,
     customSlidingRotationalSpeed: -32,
     useCustomSlidingRotationalSpeed: true,
   };
@@ -1721,6 +1994,27 @@ function isNearTestArea(x, z, margin = 0) {
   );
 }
 
+function isNearBridgeAccess(x, z, margin = 0) {
+  const point = new THREE.Vector2(x, z);
+
+  return BRIDGE_ROUTES.some((route) => {
+    const start = new THREE.Vector2(route.startX, route.startZ);
+    const end = new THREE.Vector2(route.endX, route.endZ);
+    return getPointToSegmentDistance(point, start, end) < route.width / 2 + margin;
+  });
+}
+
+function getPointToSegmentDistance(point, start, end) {
+  const segment = end.clone().sub(start);
+  const lengthSquared = segment.lengthSq();
+
+  if (lengthSquared < 0.0001) return point.distanceTo(start);
+
+  const t = THREE.MathUtils.clamp(point.clone().sub(start).dot(segment) / lengthSquared, 0, 1);
+  const closest = start.clone().addScaledVector(segment, t);
+  return point.distanceTo(closest);
+}
+
 function bindInput() {
   window.addEventListener("keydown", (event) => {
     if (isDrivingKey(event.code)) event.preventDefault();
@@ -1855,19 +2149,19 @@ function updateControls(delta) {
   const highSpeedSlip = smoothstep(HIGH_SPEED_UNDERSTEER_START, MAX_FORWARD_SPEED, absSpeed);
   const midSpeedSlip = smoothstep(34, HIGH_SPEED_UNDERSTEER_START, absSpeed);
   const driftTarget = driftKey && grounded && absSpeed > 5 ? 1 : 0;
-  driftAmount = approach(driftAmount, driftTarget, (driftTarget > driftAmount ? 3.8 : 4.6) * delta);
+  driftAmount = approach(driftAmount, driftTarget, (driftTarget > driftAmount ? 6.2 : 5.0) * delta);
   const targetSlip = THREE.MathUtils.clamp(
     steeringLoad * midSpeedSlip * 0.12 +
       steerDemandChange * midSpeedSlip * 0.08 +
       steeringLoad * highSpeedSlip * 0.16 +
-      driftAmount * 0.18,
+      driftAmount * 0.12,
     0,
     0.42,
   );
   tireSlip = approach(tireSlip, targetSlip, (targetSlip > tireSlip ? 2.2 : 2.8) * delta);
 
   const lateralSpeedForDrift = chassisBody.velocity.dot(surfaceRight);
-  const counterSteer = THREE.MathUtils.clamp(-lateralSpeedForDrift * 0.045 * driftAmount, -steerLimit * 0.72, steerLimit * 0.72);
+  const counterSteer = THREE.MathUtils.clamp(-lateralSpeedForDrift * 0.072 * driftAmount, -steerLimit * 0.92, steerLimit * 0.92);
   const frontSteer = steering * (1 - tireSlip * 0.18) + counterSteer;
   vehicle.setSteeringValue(frontSteer, 0);
   vehicle.setSteeringValue(frontSteer, 1);
@@ -1928,7 +2222,7 @@ function updateControls(delta) {
   }
 
   if (driftAmount > 0.05) {
-    rearBrake = Math.max(rearBrake, 4 + 11 * driftAmount);
+    rearBrake = Math.max(rearBrake, 34 + 42 * driftAmount);
   }
 
   vehicleDynamics.braking = braking;
@@ -1942,10 +2236,11 @@ function updateControls(delta) {
   vehicle.setBrake(frontBrake, 1);
   vehicle.setBrake(rearBrake, 2);
   vehicle.setBrake(rearBrake, 3);
+  const rearDriveShare = THREE.MathUtils.lerp(0.82, 0.16, driftAmount);
   vehicle.applyEngineForce(wheelEngineForce * 0.18, 0);
   vehicle.applyEngineForce(wheelEngineForce * 0.18, 1);
-  vehicle.applyEngineForce(wheelEngineForce * 0.82, 2);
-  vehicle.applyEngineForce(wheelEngineForce * 0.82, 3);
+  vehicle.applyEngineForce(wheelEngineForce * rearDriveShare, 2);
+  vehicle.applyEngineForce(wheelEngineForce * rearDriveShare, 3);
 
   if (grounded) {
     applyCenteredDriveForce(surfaceForward, centerDriveForce);
@@ -1991,9 +2286,10 @@ function updateLaunchTraction(throttle, signedSpeed, delta) {
 
   const wheelFriction = BASE_WHEEL_FRICTION_SLIP * THREE.MathUtils.lerp(0.46, 1, tractionGrip);
   for (let i = 0; i < vehicle.wheelInfos.length; i += 1) {
-    const driftRearLoss = i >= 2 ? driftAmount * 0.54 : driftAmount * 0.04;
-    const frontSlipLoss = i < 2 ? tireSlip * 0.2 : tireSlip * 0.08;
-    vehicle.wheelInfos[i].frictionSlip = wheelFriction * (1 - frontSlipLoss - driftRearLoss);
+    const driftRearLoss = i >= 2 ? driftAmount * 0.76 : driftAmount * 0.02;
+    const frontSlipLoss = i < 2 ? tireSlip * 0.12 : tireSlip * 0.04;
+    const gripMultiplier = THREE.MathUtils.clamp(1 - frontSlipLoss - driftRearLoss, 0.18, 1);
+    vehicle.wheelInfos[i].frictionSlip = wheelFriction * gripMultiplier;
   }
 }
 
@@ -2016,7 +2312,7 @@ function applyArcadeGrip(forward, rightVector, signedSpeed, delta) {
   const lateralGrip =
     THREE.MathUtils.clamp(delta * THREE.MathUtils.lerp(7.8, 5.3, speedFactor), 0, 0.4) *
     THREE.MathUtils.lerp(0.38, 1, tractionGrip) *
-    (1 - tireSlip * 0.18 - driftAmount * 0.5);
+    (1 - tireSlip * 0.14 - driftAmount * 0.72);
   chassisBody.velocity.x -= rightVector.x * lateralSpeed * lateralGrip;
   chassisBody.velocity.y -= rightVector.y * lateralSpeed * lateralGrip;
   chassisBody.velocity.z -= rightVector.z * lateralSpeed * lateralGrip;
@@ -2055,19 +2351,19 @@ function applyYawAssist(signedSpeed, delta) {
   const yawAssist =
     (speedFactor * 1.18 + launchFactor * 0.72) *
     THREE.MathUtils.lerp(0.72, 1, tractionGrip) *
-    (1 - tireSlip * 0.16 + driftAmount * 0.24);
+    (1 - tireSlip * 0.12 + driftAmount * 0.42);
   chassisBody.angularVelocity.y += steering * yawAssist * direction * reverseDirection * delta * 1.32;
-  chassisBody.angularVelocity.x *= 0.92;
-  chassisBody.angularVelocity.z *= 0.92;
+  chassisBody.angularVelocity.x *= 0.96;
+  chassisBody.angularVelocity.z *= 0.96;
 }
 
 function applyAccelerationStability(throttle, signedSpeed, delta) {
   if (!throttle || driveInput < 0.08) return;
 
   const speedFactor = THREE.MathUtils.clamp(Math.max(signedSpeed, 0) / MAX_FORWARD_SPEED, 0, 1);
-  const damping = THREE.MathUtils.clamp(delta * (5.2 + driveInput * 4.8) * (1 - speedFactor * 0.25), 0, 0.3);
-  chassisBody.angularVelocity.x *= 1 - damping;
-  chassisBody.angularVelocity.z *= 1 - damping;
+  const damping = THREE.MathUtils.clamp(delta * (3.2 + driveInput * 2.6) * (1 - speedFactor * 0.35), 0, 0.13);
+  chassisBody.angularVelocity.x *= 1 - damping * 0.45;
+  chassisBody.angularVelocity.z *= 1 - damping * 0.45;
 
   if (Math.abs(chassisBody.velocity.y) < 2.2) {
     chassisBody.velocity.y *= 1 - damping * 0.8;
@@ -2080,14 +2376,18 @@ function applyDriftAssist(forward, rightVector, signedSpeed, delta) {
   const lateralSpeed = chassisBody.velocity.dot(rightVector);
   const steerDirection = Math.sign(steering || lateralSpeed || 1);
   const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
-  const slideForce = driftAmount * (8 + speedFactor * 14) * steerDirection;
-  const yawKick = driftAmount * steering * (1.4 + speedFactor * 1.6);
+  const lockSlide = driftAmount * THREE.MathUtils.clamp(Math.abs(signedSpeed) / 12, 0, 1);
+  const slideForce = lockSlide * (13 + speedFactor * 22) * steerDirection;
+  const yawKick = driftAmount * steering * (2.1 + speedFactor * 2.4);
+  const rearSlipBleed = THREE.MathUtils.clamp(delta * (0.7 + speedFactor * 1.2) * driftAmount, 0, 0.16);
 
   chassisBody.velocity.x += rightVector.x * slideForce * delta;
   chassisBody.velocity.z += rightVector.z * slideForce * delta;
+  chassisBody.velocity.x -= forward.x * Math.max(0, signedSpeed) * rearSlipBleed;
+  chassisBody.velocity.z -= forward.z * Math.max(0, signedSpeed) * rearSlipBleed;
   chassisBody.angularVelocity.y += yawKick * delta;
-  chassisBody.angularVelocity.x *= 1 - Math.min(delta * 4.2, 0.18);
-  chassisBody.angularVelocity.z *= 1 - Math.min(delta * 4.2, 0.18);
+  chassisBody.angularVelocity.x *= 1 - Math.min(delta * 1.8, 0.08);
+  chassisBody.angularVelocity.z *= 1 - Math.min(delta * 1.8, 0.08);
 }
 
 function applyAntiWheelie(forward, groundNormal, signedSpeed, throttle, delta) {
@@ -2119,22 +2419,96 @@ function applyBrakeAssist(forward, signedSpeed, delta, braking) {
   chassisBody.velocity.z -= forward.z * direction * speedReduction;
 }
 
+function getGroundContactInfo() {
+  const normal = new CANNON.Vec3();
+  let groundedWheels = 0;
+  let compression = 0;
+
+  for (const wheel of vehicle.wheelInfos) {
+    const raycast = wheel.raycastResult;
+    const contact = wheel.isInContact || raycast?.hasHit;
+
+    if (!contact) continue;
+
+    groundedWheels += 1;
+    compression += Math.max(0, SUSPENSION_REST_LENGTH - (wheel.suspensionLength ?? SUSPENSION_REST_LENGTH));
+
+    if (raycast?.hitNormalWorld) {
+      normal.x += raycast.hitNormalWorld.x;
+      normal.y += raycast.hitNormalWorld.y;
+      normal.z += raycast.hitNormalWorld.z;
+    }
+  }
+
+  if (groundedWheels === 0 || normal.lengthSquared() < 0.0001 || normal.y < 0.18) {
+    normal.copy(getTerrainNormal(chassisBody.position.x, chassisBody.position.z));
+  } else {
+    normal.normalize();
+    const terrainNormal = getTerrainNormal(chassisBody.position.x, chassisBody.position.z);
+    normal.x = normal.x * 0.74 + terrainNormal.x * 0.26;
+    normal.y = normal.y * 0.74 + terrainNormal.y * 0.26;
+    normal.z = normal.z * 0.74 + terrainNormal.z * 0.26;
+    normal.normalize();
+  }
+
+  return {
+    groundedWheels,
+    contactRatio: groundedWheels / vehicle.wheelInfos.length,
+    compression: groundedWheels > 0 ? compression / groundedWheels : 0,
+    normal,
+  };
+}
+
+function applyGroundConformity(delta, contactInfo) {
+  if (contactInfo.groundedWheels === 0) return;
+
+  const currentUp = new CANNON.Vec3(0, 1, 0);
+  chassisBody.vectorToWorldFrame(currentUp, currentUp);
+  currentUp.normalize();
+
+  const desiredNormal = contactInfo.normal;
+  const correctionAxis = crossCannonVectors(currentUp, desiredNormal);
+  const axisLength = correctionAxis.length();
+
+  if (axisLength < 0.0001) return;
+
+  correctionAxis.scale(1 / axisLength, correctionAxis);
+  const error = Math.asin(THREE.MathUtils.clamp(axisLength, -1, 1));
+  const speedFactor = THREE.MathUtils.clamp(Math.abs(vehicleDynamics.signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
+  const contactGain = THREE.MathUtils.clamp(contactInfo.groundedWheels / 2, 0.35, 1);
+  const response = THREE.MathUtils.lerp(13.5, 7.2, speedFactor) * contactGain;
+  const damping = THREE.MathUtils.lerp(2.5, 1.25, speedFactor) * contactGain;
+  const angularAlongAxis = chassisBody.angularVelocity.dot(correctionAxis);
+  const correction = THREE.MathUtils.clamp((error * response - angularAlongAxis * damping) * delta, -0.18, 0.18);
+
+  chassisBody.angularVelocity.x += correctionAxis.x * correction;
+  chassisBody.angularVelocity.y += correctionAxis.y * correction;
+  chassisBody.angularVelocity.z += correctionAxis.z * correction;
+}
+
+function crossCannonVectors(a, b) {
+  return new CANNON.Vec3(
+    a.y * b.z - a.z * b.y,
+    a.z * b.x - a.x * b.z,
+    a.x * b.y - a.y * b.x,
+  );
+}
+
 function applyDamperStabilization(delta) {
-  const groundedWheels = vehicle.wheelInfos.filter(
-    (wheel) => wheel.isInContact || wheel.raycastResult?.hasHit,
-  ).length;
+  const contactInfo = getGroundContactInfo();
+  const groundedWheels = contactInfo.groundedWheels;
   if (groundedWheels === 0) return;
 
-  const contactRatio = groundedWheels / vehicle.wheelInfos.length;
+  const contactRatio = contactInfo.contactRatio;
   const groundY = getTrackElevation(chassisBody.position.x, chassisBody.position.z);
-  const groundNormal = getTerrainNormal(chassisBody.position.x, chassisBody.position.z);
+  const groundNormal = contactInfo.normal;
   const heightAboveGround = chassisBody.position.y - groundY;
   const pitchRollBlend = THREE.MathUtils.clamp(
-    delta * DAMPER_SETTINGS.chassisPitchRoll * 8 * contactRatio,
+    delta * DAMPER_SETTINGS.chassisPitchRoll * 3.2 * contactRatio,
     0,
-    0.18,
+    0.07,
   );
-  const heaveBlend = THREE.MathUtils.clamp(delta * DAMPER_SETTINGS.heave * 7 * contactRatio, 0, 0.13);
+  const heaveBlend = THREE.MathUtils.clamp(delta * DAMPER_SETTINGS.heave * 5.6 * contactRatio, 0, 0.1);
 
   applyBumpStop(groundNormal, heightAboveGround, contactRatio);
   applyTunedMassDamper(delta, contactRatio);
@@ -2240,13 +2614,12 @@ function applyAirSafety(rightVector, forward, delta, grounded) {
   chassisBody.applyForce(new CANNON.Vec3(0, -airDownforce, 0), CENTER_OF_MASS);
 }
 
-function stabilizeChassis() {
+function stabilizeChassis(delta) {
   const groundY = getTrackElevation(chassisBody.position.x, chassisBody.position.z);
   const heightAboveRest = chassisBody.position.y - groundY;
-  const groundedWheels = vehicle.wheelInfos.filter(
-    (wheel) => wheel.isInContact || wheel.raycastResult?.hasHit,
-  ).length;
-  const contactRatio = groundedWheels / vehicle.wheelInfos.length;
+  const contactInfo = getGroundContactInfo();
+  const groundedWheels = contactInfo.groundedWheels;
+  const contactRatio = contactInfo.contactRatio;
   const grounded = groundedWheels > 0;
 
   if (grounded) {
@@ -2255,11 +2628,13 @@ function stabilizeChassis() {
       ? THREE.MathUtils.clamp(-vehicleDynamics.preStepVelocityY * 0.008, 0, 0.035)
       : 0;
     const bounceLimit = 0.32 + contactRatio * 0.16;
+    const angularDamping = 1 - THREE.MathUtils.clamp(0.045 * contactRatio, 0, 0.045);
 
+    applyGroundConformity(delta, contactInfo);
     chassisBody.velocity.y = Math.min(chassisBody.velocity.y + reboundKick, bounceLimit);
-    chassisBody.velocity.y *= 0.78;
-    chassisBody.angularVelocity.x *= 0.68;
-    chassisBody.angularVelocity.z *= 0.68;
+    chassisBody.velocity.y *= 0.84;
+    chassisBody.angularVelocity.x *= angularDamping;
+    chassisBody.angularVelocity.z *= angularDamping;
   }
 
   if (heightAboveRest > 0.95 && chassisBody.velocity.y > 2.4) {
@@ -2267,7 +2642,7 @@ function stabilizeChassis() {
   }
 
   if (heightAboveRest > 0.55) {
-    const maxAngularVelocity = grounded ? 2.8 : 3.0;
+    const maxAngularVelocity = grounded ? 3.6 : 3.0;
     chassisBody.angularVelocity.x = THREE.MathUtils.clamp(
       chassisBody.angularVelocity.x,
       -maxAngularVelocity,
@@ -2776,7 +3151,7 @@ function animate() {
       updateControls(delta);
       vehicleDynamics.preStepVelocityY = chassisBody.velocity.y;
       world.step(FIXED_TIME_STEP, delta, 4);
-      stabilizeChassis();
+      stabilizeChassis(delta);
       updateLap();
       updateHud();
     }
