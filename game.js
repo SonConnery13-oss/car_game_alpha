@@ -36,6 +36,7 @@ const START_POSITION = new CANNON.Vec3(START_X, START_HEIGHT, START_Z);
 const TRACK_SURFACE_OFFSET = 0.065;
 const MAX_FORWARD_SPEED = 200 / 3.6;
 const MAX_REVERSE_SPEED = 16;
+const HIGH_SPEED_UNDERSTEER_START = 190 / 3.6;
 const STEERING_RESPONSE = 2.55;
 const STEERING_RETURN_RESPONSE = 3.85;
 const BASE_WHEEL_FRICTION_SLIP = 5.9;
@@ -136,6 +137,8 @@ let steering = 0;
 let driveInput = 0;
 let tractionGrip = 1;
 let tireSlip = 0;
+let driftAmount = 0;
+const driftSmokeParticles = [];
 const vehicleDynamics = {
   braking: false,
   throttle: false,
@@ -271,8 +274,34 @@ function getTestAreaElevation(x, z) {
   const longWave = 0.08 * Math.sin(localZ * 0.22) * centerLane;
   const slopedPad = 0.52 * smoothstep(10, 34, localZ) * rightLane;
   const rippleLane = 0.045 * Math.sin(localZ * 1.15) * Math.sin(localX * 0.22) * leftLane;
+  const curvedJumpA = getCurvedTestRamp(localX, localZ, -58, 18, 36, 14, 0.9);
+  const curvedJumpB = getCurvedTestRamp(localX, localZ, 2, 27, 42, 16, 1.05);
+  const curvedJumpC = getCurvedTestRamp(localX, localZ, 58, 12, 32, 12, 0.72);
 
-  return (repeatedRidges * laneMask + slopedPad + longWave + rippleLane) * edgeFade;
+  return (
+    repeatedRidges * laneMask +
+    slopedPad +
+    longWave +
+    rippleLane +
+    curvedJumpA +
+    curvedJumpB +
+    curvedJumpC
+  ) * edgeFade;
+}
+
+function getCurvedTestRamp(localX, localZ, centerX, centerZ, length, width, height) {
+  const x = localX - centerX;
+  const z = localZ - centerZ;
+
+  if (Math.abs(x) > width / 2 || z < -length / 2 || z > length / 2) {
+    return 0;
+  }
+
+  const t = (z + length / 2) / length;
+  const sideFade = 1 - smoothstep(width * 0.36, width * 0.5, Math.abs(x));
+  const curve = Math.sin(t * Math.PI);
+  const lip = 0.18 * Math.sin(t * Math.PI * 2);
+  return Math.max(0, height * (curve + lip) * sideFade);
 }
 
 function getSurfaceRipple(x, z) {
@@ -930,6 +959,38 @@ function createTestArea() {
     parkingMark.position.set(x, getTrackElevation(x, TEST_AREA.z + halfDepth - 13) + TRACK_SURFACE_OFFSET + 0.14, TEST_AREA.z + halfDepth - 13);
     parkingMark.renderOrder = 9;
     scene.add(parkingMark);
+  }
+
+  createCurvedRampMarkers([
+    { x: TEST_AREA.x - 58, z: TEST_AREA.z + 18, width: 14, length: 36 },
+    { x: TEST_AREA.x + 2, z: TEST_AREA.z + 27, width: 16, length: 42 },
+    { x: TEST_AREA.x + 58, z: TEST_AREA.z + 12, width: 12, length: 32 },
+  ], redMaterial, whiteMaterial);
+}
+
+function createCurvedRampMarkers(ramps, redMaterial, whiteMaterial) {
+  for (const ramp of ramps) {
+    for (let stripeIndex = 0; stripeIndex < 5; stripeIndex += 1) {
+      const z = ramp.z - ramp.length * 0.34 + stripeIndex * (ramp.length * 0.14);
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(ramp.width * 0.78, 0.035, 0.5),
+        stripeIndex % 2 === 0 ? redMaterial : whiteMaterial,
+      );
+      stripe.position.set(ramp.x, getTrackElevation(ramp.x, z) + TRACK_SURFACE_OFFSET + 0.18, z);
+      stripe.renderOrder = 10;
+      scene.add(stripe);
+    }
+
+    for (const side of [-1, 1]) {
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.034, ramp.length * 0.84), redMaterial);
+      edge.position.set(
+        ramp.x + side * ramp.width * 0.47,
+        getTrackElevation(ramp.x + side * ramp.width * 0.47, ramp.z) + TRACK_SURFACE_OFFSET + 0.16,
+        ramp.z,
+      );
+      edge.renderOrder = 10;
+      scene.add(edge);
+    }
   }
 }
 
@@ -1741,6 +1802,8 @@ function isDrivingKey(code) {
     "KeyS",
     "KeyD",
     "Space",
+    "ShiftLeft",
+    "ShiftRight",
     "Enter",
   ].includes(code);
 }
@@ -1775,27 +1838,37 @@ function updateControls(delta) {
   const throttle = keys.has("KeyW") || keys.has("ArrowUp");
   const reverse = keys.has("KeyS") || keys.has("ArrowDown");
   const handbrake = keys.has("Space");
+  const driftKey = keys.has("ShiftLeft") || keys.has("ShiftRight");
 
-  const speedSteerFactor = smoothstep(8, MAX_FORWARD_SPEED, Math.abs(signedSpeed));
-  const steerLimit = THREE.MathUtils.lerp(0.5, 0.12, speedSteerFactor);
+  const absSpeed = Math.abs(signedSpeed);
+  const speedSteerFactor = smoothstep(10, MAX_FORWARD_SPEED, absSpeed);
+  const steerLimit = THREE.MathUtils.lerp(0.52, 0.18, speedSteerFactor);
   const rawSteerInput = (left ? 1 : 0) + (right ? -1 : 0);
   const targetSteer = rawSteerInput * steerLimit;
   const steerDemandChange = Math.abs(targetSteer - steering) / Math.max(steerLimit, 0.001);
   const steeringResponse =
     (targetSteer === 0 ? STEERING_RETURN_RESPONSE : STEERING_RESPONSE) *
-    THREE.MathUtils.lerp(1, 0.76, speedSteerFactor);
+    THREE.MathUtils.lerp(1, 0.84, speedSteerFactor);
   steering = THREE.MathUtils.lerp(steering, targetSteer, 1 - Math.exp(-steeringResponse * delta));
 
   const steeringLoad = Math.abs(steering) / Math.max(steerLimit, 0.001);
+  const highSpeedSlip = smoothstep(HIGH_SPEED_UNDERSTEER_START, MAX_FORWARD_SPEED, absSpeed);
+  const midSpeedSlip = smoothstep(34, HIGH_SPEED_UNDERSTEER_START, absSpeed);
+  const driftTarget = driftKey && grounded && absSpeed > 5 ? 1 : 0;
+  driftAmount = approach(driftAmount, driftTarget, (driftTarget > driftAmount ? 3.8 : 4.6) * delta);
   const targetSlip = THREE.MathUtils.clamp(
-    steeringLoad * smoothstep(20, 62, Math.abs(signedSpeed)) * 0.58 +
-      steerDemandChange * smoothstep(14, 48, Math.abs(signedSpeed)) * 0.44,
+    steeringLoad * midSpeedSlip * 0.12 +
+      steerDemandChange * midSpeedSlip * 0.08 +
+      steeringLoad * highSpeedSlip * 0.16 +
+      driftAmount * 0.18,
     0,
-    1,
+    0.42,
   );
-  tireSlip = approach(tireSlip, targetSlip, (targetSlip > tireSlip ? 2.7 : 1.6) * delta);
+  tireSlip = approach(tireSlip, targetSlip, (targetSlip > tireSlip ? 2.2 : 2.8) * delta);
 
-  const frontSteer = steering * (1 - tireSlip * 0.46);
+  const lateralSpeedForDrift = chassisBody.velocity.dot(surfaceRight);
+  const counterSteer = THREE.MathUtils.clamp(-lateralSpeedForDrift * 0.045 * driftAmount, -steerLimit * 0.72, steerLimit * 0.72);
+  const frontSteer = steering * (1 - tireSlip * 0.18) + counterSteer;
   vehicle.setSteeringValue(frontSteer, 0);
   vehicle.setSteeringValue(frontSteer, 1);
 
@@ -1854,6 +1927,10 @@ function updateControls(delta) {
     rearBrake = 20;
   }
 
+  if (driftAmount > 0.05) {
+    rearBrake = Math.max(rearBrake, 4 + 11 * driftAmount);
+  }
+
   vehicleDynamics.braking = braking;
   vehicleDynamics.throttle = throttle;
   vehicleDynamics.reverse = reverse;
@@ -1877,6 +1954,7 @@ function updateControls(delta) {
     applyAntiWheelie(surfaceForward, groundNormal, signedSpeed, throttle, delta);
     applyBrakeAssist(surfaceForward, signedSpeed, delta, braking);
     applyAccelerationStability(throttle, signedSpeed, delta);
+    applyDriftAssist(surfaceForward, surfaceRight, signedSpeed, delta);
     applyDamperStabilization(delta);
 
     const downForce = Math.min(speed * speed * 2.45, 4800);
@@ -1913,8 +1991,9 @@ function updateLaunchTraction(throttle, signedSpeed, delta) {
 
   const wheelFriction = BASE_WHEEL_FRICTION_SLIP * THREE.MathUtils.lerp(0.46, 1, tractionGrip);
   for (let i = 0; i < vehicle.wheelInfos.length; i += 1) {
-    const frontSlipLoss = i < 2 ? tireSlip * 0.48 : tireSlip * 0.18;
-    vehicle.wheelInfos[i].frictionSlip = wheelFriction * (1 - frontSlipLoss);
+    const driftRearLoss = i >= 2 ? driftAmount * 0.54 : driftAmount * 0.04;
+    const frontSlipLoss = i < 2 ? tireSlip * 0.2 : tireSlip * 0.08;
+    vehicle.wheelInfos[i].frictionSlip = wheelFriction * (1 - frontSlipLoss - driftRearLoss);
   }
 }
 
@@ -1937,7 +2016,7 @@ function applyArcadeGrip(forward, rightVector, signedSpeed, delta) {
   const lateralGrip =
     THREE.MathUtils.clamp(delta * THREE.MathUtils.lerp(7.8, 5.3, speedFactor), 0, 0.4) *
     THREE.MathUtils.lerp(0.38, 1, tractionGrip) *
-    (1 - tireSlip * 0.55);
+    (1 - tireSlip * 0.18 - driftAmount * 0.5);
   chassisBody.velocity.x -= rightVector.x * lateralSpeed * lateralGrip;
   chassisBody.velocity.y -= rightVector.y * lateralSpeed * lateralGrip;
   chassisBody.velocity.z -= rightVector.z * lateralSpeed * lateralGrip;
@@ -1945,10 +2024,10 @@ function applyArcadeGrip(forward, rightVector, signedSpeed, delta) {
   const steeringSlide =
     steering *
     tireSlip *
-    smoothstep(16, 62, Math.abs(signedSpeed)) *
+    smoothstep(16, MAX_FORWARD_SPEED, Math.abs(signedSpeed)) *
     Math.abs(signedSpeed) *
     delta *
-    0.16;
+    0.07;
   chassisBody.velocity.x += rightVector.x * steeringSlide;
   chassisBody.velocity.z += rightVector.z * steeringSlide;
 
@@ -1976,7 +2055,7 @@ function applyYawAssist(signedSpeed, delta) {
   const yawAssist =
     (speedFactor * 1.18 + launchFactor * 0.72) *
     THREE.MathUtils.lerp(0.72, 1, tractionGrip) *
-    (1 - tireSlip * 0.48);
+    (1 - tireSlip * 0.16 + driftAmount * 0.24);
   chassisBody.angularVelocity.y += steering * yawAssist * direction * reverseDirection * delta * 1.32;
   chassisBody.angularVelocity.x *= 0.92;
   chassisBody.angularVelocity.z *= 0.92;
@@ -1993,6 +2072,22 @@ function applyAccelerationStability(throttle, signedSpeed, delta) {
   if (Math.abs(chassisBody.velocity.y) < 2.2) {
     chassisBody.velocity.y *= 1 - damping * 0.8;
   }
+}
+
+function applyDriftAssist(forward, rightVector, signedSpeed, delta) {
+  if (driftAmount <= 0.02) return;
+
+  const lateralSpeed = chassisBody.velocity.dot(rightVector);
+  const steerDirection = Math.sign(steering || lateralSpeed || 1);
+  const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
+  const slideForce = driftAmount * (8 + speedFactor * 14) * steerDirection;
+  const yawKick = driftAmount * steering * (1.4 + speedFactor * 1.6);
+
+  chassisBody.velocity.x += rightVector.x * slideForce * delta;
+  chassisBody.velocity.z += rightVector.z * slideForce * delta;
+  chassisBody.angularVelocity.y += yawKick * delta;
+  chassisBody.angularVelocity.x *= 1 - Math.min(delta * 4.2, 0.18);
+  chassisBody.angularVelocity.z *= 1 - Math.min(delta * 4.2, 0.18);
 }
 
 function applyAntiWheelie(forward, groundNormal, signedSpeed, throttle, delta) {
@@ -2245,6 +2340,59 @@ function updateVehicleMeshes(delta) {
 
   updateSuspensionVisual(delta);
   updateTunedMassVisual();
+  emitDriftSmoke(delta);
+  updateDriftSmoke(delta);
+}
+
+function emitDriftSmoke(delta) {
+  if (driftAmount < 0.12 || !vehicleDynamics.grounded || Math.abs(vehicleDynamics.signedSpeed) < 7) return;
+
+  const emissionChance = driftAmount * Math.min(Math.abs(vehicleDynamics.signedSpeed) / 26, 1) * delta * 30;
+  if (Math.random() > emissionChance) return;
+
+  for (const wheelIndex of [2, 3]) {
+    const wheel = wheelMeshes[wheelIndex];
+    if (!wheel) continue;
+
+    const puff = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 8, 6),
+      new THREE.MeshBasicMaterial({
+        color: 0xaeb2b1,
+        transparent: true,
+        opacity: 0.22,
+        depthWrite: false,
+      }),
+    );
+    puff.position.copy(wheel.position);
+    puff.position.y += 0.08;
+    puff.scale.setScalar(0.55 + Math.random() * 0.25);
+    puff.userData.life = 0.75;
+    puff.userData.maxLife = 0.75;
+    puff.userData.velocity = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.35,
+      0.35 + Math.random() * 0.22,
+      (Math.random() - 0.5) * 0.35,
+    );
+    driftSmokeParticles.push(puff);
+    scene.add(puff);
+  }
+}
+
+function updateDriftSmoke(delta) {
+  for (let i = driftSmokeParticles.length - 1; i >= 0; i -= 1) {
+    const puff = driftSmokeParticles[i];
+    puff.userData.life -= delta;
+    puff.position.addScaledVector(puff.userData.velocity, delta);
+    puff.scale.multiplyScalar(1 + delta * 1.15);
+    puff.material.opacity = Math.max(0, 0.22 * (puff.userData.life / puff.userData.maxLife));
+
+    if (puff.userData.life <= 0) {
+      scene.remove(puff);
+      puff.geometry.dispose();
+      puff.material.dispose();
+      driftSmokeParticles.splice(i, 1);
+    }
+  }
 }
 
 function updateSuspensionVisual(delta) {
@@ -2537,6 +2685,7 @@ function resetCar() {
   driveInput = 0;
   tractionGrip = 1;
   tireSlip = 0;
+  driftAmount = 0;
   vehicleDynamics.braking = false;
   vehicleDynamics.throttle = false;
   vehicleDynamics.reverse = false;
@@ -2563,6 +2712,11 @@ function resetCar() {
   carVisualMotion.initialized = false;
   for (const wheelMotion of wheelMeshMotion) {
     wheelMotion.initialized = false;
+  }
+  for (const puff of driftSmokeParticles.splice(0)) {
+    scene.remove(puff);
+    puff.geometry.dispose();
+    puff.material.dispose();
   }
   for (const wheelState of wheelVisualStates) {
     wheelState.compression = 0;
