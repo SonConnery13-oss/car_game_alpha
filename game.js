@@ -9,6 +9,16 @@ const currentLapValue = document.querySelector("#currentLapValue");
 const bestLapValue = document.querySelector("#bestLapValue");
 const startButton = document.querySelector("#startButton");
 const message = document.querySelector("#message");
+const mainMenu = document.querySelector("#mainMenu");
+const developersScreen = document.querySelector("#developersScreen");
+const garageScreen = document.querySelector("#garageScreen");
+const gameStartButton = document.querySelector("#gameStartButton");
+const developersButton = document.querySelector("#developersButton");
+const garageButton = document.querySelector("#garageButton");
+const selectedCarName = document.querySelector("#selectedCarName");
+const selectedCarImage = document.querySelector("#selectedCarImage");
+const garageOptions = document.querySelectorAll("[data-car-id]");
+const menuBackButtons = document.querySelectorAll("[data-menu-back]");
 
 const ROAD_WIDTH = 14;
 const TRACK_RADIUS = 30;
@@ -76,6 +86,18 @@ const VISUAL_SUSPENSION = {
   airborneResponse: 28,
   impactDecay: 34,
 };
+const CAR_MODELS = {
+  gt3: {
+    name: "GT3 RS Prototype",
+    previewClass: "garage-preview-gt3",
+    rimColor: 0xc52d22,
+  },
+  amg: {
+    name: "AMG GT Track",
+    previewClass: "garage-preview-amg",
+    rimColor: 0x3c403d,
+  },
+};
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x9fcbe6, 0.0048);
@@ -136,7 +158,9 @@ world.addContactMaterial(
 const keys = new Set();
 const wheelMeshes = [];
 const trackPoints = createTrackPoints();
-let paused = false;
+let selectedCarId = "gt3";
+let paused = true;
+let menuActive = true;
 let cameraMode = 0;
 let steering = 0;
 let driveInput = 0;
@@ -209,11 +233,15 @@ let pauseStartedAt = null;
 
 setupLighting();
 createWorld();
-const { vehicle, chassisBody, carGroup } = createVehicle();
+const vehicleBundle = createVehicle();
+const vehicle = vehicleBundle.vehicle;
+const chassisBody = vehicleBundle.chassisBody;
+let carGroup = vehicleBundle.carGroup;
 driftLabelSprite = createDriftLabelSprite();
 scene.add(driftLabelSprite);
 resetCar();
 bindInput();
+setupMenu();
 setupDebugTools();
 animate();
 
@@ -1505,7 +1533,7 @@ function createVehicle() {
 
   vehicle.addToWorld(world);
 
-  const carGroup = createCarMesh();
+  const carGroup = createCarMesh(selectedCarId);
   scene.add(carGroup);
 
   const wheelMaterial = new THREE.MeshStandardMaterial({
@@ -1514,7 +1542,7 @@ function createVehicle() {
     metalness: 0.08,
   });
   const rimMaterial = new THREE.MeshStandardMaterial({
-    color: 0xc52d22,
+    color: CAR_MODELS[selectedCarId]?.rimColor ?? 0xc52d22,
     roughness: 0.32,
     metalness: 0.58,
   });
@@ -1573,7 +1601,11 @@ function createVehicle() {
   return { vehicle, chassisBody, carGroup };
 }
 
-function createCarMesh() {
+function createCarMesh(modelId = selectedCarId) {
+  if (modelId === "amg") {
+    return createAmgCarMesh();
+  }
+
   const group = new THREE.Group();
   const visualRoot = new THREE.Group();
   visualRoot.name = "carVisualRoot";
@@ -1764,6 +1796,224 @@ function createCarMesh() {
   box(0.52, 0.68, 0.12, trimMaterial, 0.34, 0.66, -0.42, 0.62, -0.12, -0.16);
   box(0.06, 0.5, 1.12, trimMaterial, -0.54, 0.62, -0.48, 0.32, 0.08);
   box(0.06, 0.5, 1.12, trimMaterial, 0.54, 0.62, -0.48, 0.32, -0.08);
+
+  const damperPositions = [
+    [-0.82, -0.12, 1.35],
+    [0.82, -0.12, 1.35],
+    [-0.82, -0.12, -1.35],
+    [0.82, -0.12, -1.35],
+  ];
+
+  for (let index = 0; index < damperPositions.length; index += 1) {
+    const [x, y, z] = damperPositions[index];
+    const spring = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.58, 10), damperMaterial);
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.78, 10), damperRodMaterial);
+    spring.name = `damperSpring${index}`;
+    rod.name = `damperRod${index}`;
+    spring.position.set(x, y + 0.06, z);
+    rod.position.set(x, y + 0.06, z);
+    spring.userData.baseY = y + 0.06;
+    rod.userData.baseY = y + 0.06;
+    spring.rotation.z = x < 0 ? -0.18 : 0.18;
+    rod.rotation.z = spring.rotation.z;
+    spring.castShadow = true;
+    rod.castShadow = true;
+    visualRoot.add(spring, rod);
+  }
+
+  const tunedMassBlock = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.18, 0.46), tunedMassMaterial);
+  tunedMassBlock.name = "tunedMassBlock";
+  tunedMassBlock.position.set(0, 0.52, -0.08);
+  tunedMassBlock.castShadow = true;
+
+  const tunedMassRailA = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.88, 8), damperRodMaterial);
+  tunedMassRailA.position.set(-0.25, 0.52, -0.08);
+  tunedMassRailA.rotation.x = Math.PI / 2;
+  const tunedMassRailB = tunedMassRailA.clone();
+  tunedMassRailB.position.x = 0.25;
+
+  visualRoot.add(tunedMassBlock, tunedMassRailA, tunedMassRailB);
+  group.add(visualRoot);
+  return group;
+}
+
+function createAmgCarMesh() {
+  const group = new THREE.Group();
+  const visualRoot = new THREE.Group();
+  visualRoot.name = "carVisualRoot";
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4f5856,
+    roughness: 0.24,
+    metalness: 0.48,
+  });
+  const bodyDarkMaterial = new THREE.MeshStandardMaterial({
+    color: 0x303735,
+    roughness: 0.34,
+    metalness: 0.42,
+  });
+  const greenAccentMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8ee337,
+    roughness: 0.32,
+    metalness: 0.18,
+  });
+  const carbonMaterial = new THREE.MeshStandardMaterial({
+    color: 0x050707,
+    roughness: 0.4,
+    metalness: 0.34,
+  });
+  const blackMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0b0d0d,
+    roughness: 0.58,
+    metalness: 0.18,
+  });
+  const glassMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x121c1f,
+    roughness: 0.04,
+    metalness: 0.08,
+    transmission: 0.16,
+    transparent: true,
+    opacity: 0.56,
+  });
+  const chromeMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc7cfca,
+    roughness: 0.22,
+    metalness: 0.76,
+  });
+  const headlightMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xdff5ff,
+    roughness: 0.02,
+    transmission: 0.35,
+    transparent: true,
+    opacity: 0.82,
+    side: THREE.DoubleSide,
+  });
+  const redLightMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff2a45,
+    transparent: true,
+    opacity: 0.82,
+  });
+  const damperMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf2c84b,
+    roughness: 0.32,
+    metalness: 0.45,
+  });
+  const damperRodMaterial = new THREE.MeshStandardMaterial({
+    color: 0xcfd9df,
+    roughness: 0.22,
+    metalness: 0.72,
+  });
+  const tunedMassMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8ee337,
+    roughness: 0.28,
+    metalness: 0.45,
+  });
+
+  function box(width, height, depth, material, x, y, z, rx = 0, ry = 0, rz = 0, name = "") {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    mesh.receiveShadow = material !== glassMaterial;
+    if (name) mesh.name = name;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function cylinder(radius, height, material, x, y, z, rx = 0, ry = 0, rz = 0, name = "") {
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 18), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    if (name) mesh.name = name;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function plane(width, height, material, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.renderOrder = 9;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  const stripeMaterial = new THREE.MeshBasicMaterial({ color: 0x8ee337, side: THREE.DoubleSide });
+  const sideDecalMaterial = new THREE.MeshBasicMaterial({
+    map: makeCarDecalTexture("V8 BITURBO"),
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+  const plateMaterial = new THREE.MeshBasicMaterial({
+    map: makeLicensePlateTexture("S MB 2932"),
+    side: THREE.DoubleSide,
+  });
+
+  box(2.12, 0.34, 4.18, bodyMaterial, 0, 0, -0.04);
+  box(1.66, 0.2, 1.84, bodyMaterial, 0, 0.33, 0.86, -0.09);
+  box(1.9, 0.26, 1.28, bodyDarkMaterial, 0, 0.35, -1.42, 0.06);
+  box(1.48, 0.62, 1.34, glassMaterial, 0, 0.73, -0.36, -0.08);
+  box(1.24, 0.1, 1.48, bodyMaterial, 0, 0.93, -0.42, -0.04);
+  box(1.72, 0.08, 0.12, blackMaterial, 0, 0.7, 0.42, -0.05);
+  box(1.58, 0.06, 0.12, blackMaterial, 0, 0.92, -1.08, -0.06);
+
+  box(0.18, 0.02, 1.5, greenAccentMaterial, -0.17, 0.49, 0.93, -0.09);
+  box(0.18, 0.02, 1.5, greenAccentMaterial, 0.17, 0.49, 0.93, -0.09);
+  box(1.28, 0.07, 0.08, greenAccentMaterial, 0, 0.39, 1.62, -0.08);
+
+  box(2.36, 0.18, 0.3, carbonMaterial, 0, -0.25, 2.18);
+  box(1.28, 0.48, 0.16, blackMaterial, 0, 0.08, 2.2);
+  for (let slat = -4; slat <= 4; slat += 1) {
+    box(0.045, 0.46, 0.08, chromeMaterial, slat * 0.13, 0.1, 2.29);
+  }
+
+  const badgeRing = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.014, 10, 30), chromeMaterial);
+  badgeRing.position.set(0, 0.12, 2.34);
+  badgeRing.castShadow = true;
+  visualRoot.add(badgeRing);
+  for (let spoke = 0; spoke < 3; spoke += 1) {
+    const starSpoke = box(0.02, 0.02, 0.25, chromeMaterial, 0, 0.12, 2.36, 0, 0, (spoke / 3) * Math.PI * 2);
+    starSpoke.castShadow = true;
+  }
+
+  for (const side of [-1, 1]) {
+    box(0.24, 0.43, 0.82, bodyMaterial, side * 1.07, 0.1, 1.38);
+    box(0.22, 0.54, 0.92, bodyDarkMaterial, side * 1.08, 0.08, -1.43);
+    box(0.16, 0.6, 0.74, carbonMaterial, side * 1.18, -0.04, 1.28);
+    box(0.16, 0.68, 0.86, carbonMaterial, side * 1.18, -0.04, -1.42);
+    box(0.1, 0.18, 0.62, blackMaterial, side * 1.14, 0.28, 0.38);
+    box(0.1, 0.1, 1.76, carbonMaterial, side * 1.08, -0.26, -0.18);
+    box(0.08, 0.08, 1.5, greenAccentMaterial, side * 1.18, -0.07, -0.2);
+    box(0.13, 0.08, 0.4, bodyMaterial, side * 1.34, 0.4, 0.6, 0, side * 0.2);
+    plane(1.26, 0.28, sideDecalMaterial, side * 1.21, 0.02, -0.36, 0, side > 0 ? Math.PI / 2 : -Math.PI / 2);
+  }
+
+  for (const side of [-1, 1]) {
+    const headlight = new THREE.Mesh(new THREE.CircleGeometry(0.19, 24), headlightMaterial);
+    headlight.position.set(side * 0.71, 0.29, 2.16);
+    headlight.scale.x = 1.42;
+    headlight.renderOrder = 10;
+    visualRoot.add(headlight);
+    box(0.34, 0.04, 0.05, chromeMaterial, side * 0.72, 0.35, 2.18, 0, 0, side * -0.18);
+    box(0.34, 0.08, 0.1, blackMaterial, side * 0.88, -0.08, 1.92, 0, side * 0.12);
+  }
+
+  box(2.12, 0.28, 0.26, carbonMaterial, 0, -0.14, -2.15);
+  box(1.86, 0.08, 0.08, redLightMaterial, 0, 0.3, -2.07);
+  box(0.82, 0.24, 0.08, blackMaterial, 0, -0.04, -2.26);
+  cylinder(0.07, 0.38, chromeMaterial, -0.22, -0.24, -2.28, Math.PI / 2);
+  cylinder(0.07, 0.38, chromeMaterial, 0.22, -0.24, -2.28, Math.PI / 2);
+  plane(0.76, 0.23, plateMaterial, 0, 0.03, -2.255, 0, Math.PI);
+
+  box(2.7, 0.08, 0.3, carbonMaterial, 0, 1.1, -2.2, -0.04);
+  box(0.11, 0.42, 0.54, carbonMaterial, -1.36, 1.04, -2.2, 0.02);
+  box(0.11, 0.42, 0.54, carbonMaterial, 1.36, 1.04, -2.2, 0.02);
+  box(0.07, 0.7, 0.08, carbonMaterial, -0.58, 0.73, -1.96, 0.14);
+  box(0.07, 0.7, 0.08, carbonMaterial, 0.58, 0.73, -1.96, 0.14);
+
+  box(0.52, 0.64, 0.12, blackMaterial, -0.34, 0.65, -0.42, 0.62, 0.12, 0.16);
+  box(0.52, 0.64, 0.12, blackMaterial, 0.34, 0.65, -0.42, 0.62, -0.12, -0.16);
 
   const damperPositions = [
     [-0.82, -0.12, 1.35],
@@ -2051,6 +2301,10 @@ function getWrappedIndexDistance(a, b, count) {
 function bindInput() {
   window.addEventListener("keydown", (event) => {
     if (isDrivingKey(event.code)) event.preventDefault();
+    if (menuActive && event.code === "Enter" && !event.repeat) {
+      startGame();
+      return;
+    }
     keys.add(event.code);
 
     if (event.code === "KeyR") resetCar();
@@ -2074,6 +2328,93 @@ function bindInput() {
   readyTimeout = window.setTimeout(() => {
     if (!paused) message.classList.remove("is-visible");
   }, 1200);
+}
+
+function setupMenu() {
+  updateSelectedCarUi();
+  startButton.classList.toggle("is-running", !paused);
+  startButton.classList.toggle("is-paused", paused);
+  message.textContent = "READY";
+  message.classList.add("is-visible");
+
+  gameStartButton?.addEventListener("click", startGame);
+  developersButton?.addEventListener("click", () => showMenuScreen("developers"));
+  garageButton?.addEventListener("click", () => showMenuScreen("garage"));
+
+  for (const button of menuBackButtons) {
+    button.addEventListener("click", showMainMenu);
+  }
+
+  for (const option of garageOptions) {
+    option.addEventListener("click", () => selectCar(option.dataset.carId));
+  }
+}
+
+function startGame() {
+  menuActive = false;
+  mainMenu?.classList.add("is-hidden");
+  if (developersScreen) developersScreen.hidden = true;
+  if (garageScreen) garageScreen.hidden = true;
+  resetCar();
+  setPaused(false);
+}
+
+function showMenuScreen(screen) {
+  if (mainMenu) mainMenu.classList.add("is-hidden");
+  if (developersScreen) developersScreen.hidden = screen !== "developers";
+  if (garageScreen) garageScreen.hidden = screen !== "garage";
+}
+
+function showMainMenu() {
+  if (developersScreen) developersScreen.hidden = true;
+  if (garageScreen) garageScreen.hidden = true;
+  mainMenu?.classList.remove("is-hidden");
+}
+
+function selectCar(carId) {
+  if (!CAR_MODELS[carId]) return;
+
+  selectedCarId = carId;
+  replaceCarMesh();
+  updateSelectedCarUi();
+}
+
+function replaceCarMesh() {
+  if (carGroup) {
+    scene.remove(carGroup);
+    disposeObject3D(carGroup);
+  }
+
+  carGroup = createCarMesh(selectedCarId);
+  scene.add(carGroup);
+  carVisualMotion.initialized = false;
+}
+
+function updateSelectedCarUi() {
+  const selected = CAR_MODELS[selectedCarId];
+  if (!selected) return;
+
+  if (selectedCarName) selectedCarName.textContent = selected.name;
+  if (selectedCarImage) {
+    selectedCarImage.className = `garage-preview ${selected.previewClass}`;
+  }
+
+  for (const option of garageOptions) {
+    option.classList.toggle("is-selected", option.dataset.carId === selectedCarId);
+  }
+}
+
+function disposeObject3D(object) {
+  object.traverse((child) => {
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) {
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (material.map) material.map.dispose();
+        material.dispose();
+      }
+    }
+  });
 }
 
 function setupDebugTools() {
@@ -2408,10 +2749,10 @@ function applyDriftAssist(forward, rightVector, signedSpeed, delta) {
   const steerDirection = Math.sign(steering || lateralSpeed || 1);
   const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
   const driftSpeed = THREE.MathUtils.clamp(Math.abs(signedSpeed) / 12, 0, 1);
-  const naturalYawRate = steerDirection * driftAmount * driftSpeed * (0.95 + speedFactor * 1.65);
-  const yawBlend = THREE.MathUtils.clamp(delta * (2.8 + speedFactor * 2.4), 0, 0.18);
-  const sideSlipTarget = steerDirection * driftAmount * driftSpeed * (1.1 + speedFactor * 2.2);
-  const sideSlipBlend = THREE.MathUtils.clamp(delta * 1.15, 0, 0.08);
+  const naturalYawRate = steerDirection * driftAmount * driftSpeed * (1.8 + speedFactor * 2.9);
+  const yawBlend = THREE.MathUtils.clamp(delta * (3.8 + speedFactor * 3.1), 0, 0.24);
+  const sideSlipTarget = steerDirection * driftAmount * driftSpeed * (3.2 + speedFactor * 5.4);
+  const sideSlipBlend = THREE.MathUtils.clamp(delta * 1.9, 0, 0.14);
 
   chassisBody.angularVelocity.y += (naturalYawRate - chassisBody.angularVelocity.y) * yawBlend;
   chassisBody.velocity.x += rightVector.x * (sideSlipTarget - lateralSpeed) * sideSlipBlend;

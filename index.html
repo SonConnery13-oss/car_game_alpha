@@ -19,6 +19,52 @@
     <main id="game">
       <canvas id="gameCanvas" aria-label="3D racing game"></canvas>
 
+      <section id="mainMenu" class="menu-shell" aria-label="Main menu">
+        <div class="menu-panel menu-panel-primary">
+          <p class="menu-kicker">CITY CIRCUIT</p>
+          <h1>Racing Prototype</h1>
+          <div class="menu-actions" aria-label="Menu actions">
+            <button class="menu-button is-primary" id="gameStartButton" type="button">Game Start!</button>
+            <button class="menu-button" id="developersButton" type="button">Game Developers</button>
+            <button class="menu-button" id="garageButton" type="button">Garage</button>
+          </div>
+        </div>
+
+        <aside class="selected-car-panel" aria-label="Selected car">
+          <div class="selected-car-preview">
+            <div id="selectedCarImage" class="garage-preview garage-preview-gt3"></div>
+          </div>
+          <span id="selectedCarName">GT3 RS Prototype</span>
+        </aside>
+      </section>
+
+      <section id="developersScreen" class="menu-screen" aria-label="Game developers" hidden>
+        <div class="screen-card">
+          <p class="menu-kicker">GAME DEVELOPERS</p>
+          <h2>손태영</h2>
+          <button class="menu-button" data-menu-back type="button">Back</button>
+        </div>
+      </section>
+
+      <section id="garageScreen" class="menu-screen" aria-label="Garage" hidden>
+        <div class="garage-card">
+          <div class="garage-header">
+            <p class="menu-kicker">GARAGE</p>
+            <button class="menu-button" data-menu-back type="button">Back</button>
+          </div>
+          <div class="garage-grid">
+            <button class="garage-option is-selected" type="button" data-car-id="gt3">
+              <span class="garage-preview garage-preview-gt3"></span>
+              <strong>GT3 RS Prototype</strong>
+            </button>
+            <button class="garage-option" type="button" data-car-id="amg">
+              <span class="garage-preview garage-preview-amg"></span>
+              <strong>AMG GT Track</strong>
+            </button>
+          </div>
+        </div>
+      </section>
+
       <section id="hud" aria-label="Telemetry">
         <div class="hud-panel speed-panel">
           <span>KM/H</span>
