@@ -2343,7 +2343,7 @@ function applyArcadeGrip(forward, rightVector, signedSpeed, delta) {
   const lateralGrip =
     THREE.MathUtils.clamp(delta * THREE.MathUtils.lerp(7.8, 5.3, speedFactor), 0, 0.4) *
     THREE.MathUtils.lerp(0.38, 1, tractionGrip) *
-    (1 - tireSlip * 0.14 - driftAmount * 0.52);
+    (1 - tireSlip * 0.14);
   chassisBody.velocity.x -= rightVector.x * lateralSpeed * lateralGrip;
   chassisBody.velocity.y -= rightVector.y * lateralSpeed * lateralGrip;
   chassisBody.velocity.z -= rightVector.z * lateralSpeed * lateralGrip;
@@ -2382,7 +2382,7 @@ function applyYawAssist(signedSpeed, delta) {
   const yawAssist =
     (speedFactor * 1.18 + launchFactor * 0.72) *
     THREE.MathUtils.lerp(0.72, 1, tractionGrip) *
-    (1 - tireSlip * 0.12 + driftAmount * 0.42);
+    (1 - tireSlip * 0.12 + driftAmount * 0.58);
   chassisBody.angularVelocity.y += steering * yawAssist * direction * reverseDirection * delta * 1.32;
   chassisBody.angularVelocity.x *= 0.96;
   chassisBody.angularVelocity.z *= 0.96;
@@ -2407,13 +2407,15 @@ function applyDriftAssist(forward, rightVector, signedSpeed, delta) {
   const lateralSpeed = chassisBody.velocity.dot(rightVector);
   const steerDirection = Math.sign(steering || lateralSpeed || 1);
   const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
-  const gripSlide = driftAmount * THREE.MathUtils.clamp(Math.abs(signedSpeed) / 10, 0, 1);
-  const slideForce = gripSlide * (7 + speedFactor * 16) * steerDirection;
-  const yawKick = driftAmount * steering * (1.55 + speedFactor * 2.15);
+  const driftSpeed = THREE.MathUtils.clamp(Math.abs(signedSpeed) / 12, 0, 1);
+  const naturalYawRate = steerDirection * driftAmount * driftSpeed * (0.95 + speedFactor * 1.65);
+  const yawBlend = THREE.MathUtils.clamp(delta * (2.8 + speedFactor * 2.4), 0, 0.18);
+  const sideSlipTarget = steerDirection * driftAmount * driftSpeed * (1.1 + speedFactor * 2.2);
+  const sideSlipBlend = THREE.MathUtils.clamp(delta * 1.15, 0, 0.08);
 
-  chassisBody.velocity.x += rightVector.x * slideForce * delta;
-  chassisBody.velocity.z += rightVector.z * slideForce * delta;
-  chassisBody.angularVelocity.y += yawKick * delta;
+  chassisBody.angularVelocity.y += (naturalYawRate - chassisBody.angularVelocity.y) * yawBlend;
+  chassisBody.velocity.x += rightVector.x * (sideSlipTarget - lateralSpeed) * sideSlipBlend;
+  chassisBody.velocity.z += rightVector.z * (sideSlipTarget - lateralSpeed) * sideSlipBlend;
   chassisBody.angularVelocity.x *= 1 - Math.min(delta * 1.8, 0.08);
   chassisBody.angularVelocity.z *= 1 - Math.min(delta * 1.8, 0.08);
 }
@@ -2658,17 +2660,32 @@ function stabilizeChassis(delta) {
       vehicleDynamics.airborneFallSpeed,
     );
     const airborneBounce = THREE.MathUtils.clamp(vehicleDynamics.airborneTime * 0.18, 0, 0.18);
-    const reboundKick = justLanded
-      ? THREE.MathUtils.clamp(landingSpeed * 0.13 + airborneBounce, 0.04, 0.82)
+    const chassisBounce = justLanded
+      ? THREE.MathUtils.clamp(landingSpeed * 0.18 + airborneBounce, 0.08, 1.15)
       : 0;
-    const bounceLimit = 0.42 + contactRatio * 0.26 + THREE.MathUtils.clamp(landingSpeed * 0.045, 0, 0.3);
+    const bounceLimit = 0.55 + contactRatio * 0.34 + THREE.MathUtils.clamp(landingSpeed * 0.07, 0, 0.55);
     const angularDamping = 1 - THREE.MathUtils.clamp(0.045 * contactRatio, 0, 0.045);
 
     applyGroundConformity(delta, contactInfo);
-    chassisBody.velocity.y = justLanded
-      ? Math.min(Math.max(chassisBody.velocity.y, 0) + reboundKick, bounceLimit)
-      : Math.min(chassisBody.velocity.y, bounceLimit);
-    chassisBody.velocity.y *= justLanded ? 0.94 : 0.84;
+    if (justLanded) {
+      chassisBody.velocity.x += contactInfo.normal.x * chassisBounce;
+      chassisBody.velocity.y += contactInfo.normal.y * chassisBounce;
+      chassisBody.velocity.z += contactInfo.normal.z * chassisBounce;
+      chassisBody.velocity.y = Math.min(Math.max(chassisBody.velocity.y, chassisBounce * 0.72), bounceLimit);
+      chassisBody.angularVelocity.x += THREE.MathUtils.clamp(
+        vehicleDynamics.lastGroundSlope * landingSpeed * 0.075,
+        -0.38,
+        0.38,
+      );
+      chassisBody.angularVelocity.z += THREE.MathUtils.clamp(
+        -vehicleDynamics.lastSideSlope * landingSpeed * 0.065,
+        -0.32,
+        0.32,
+      );
+    } else {
+      chassisBody.velocity.y = Math.min(chassisBody.velocity.y, bounceLimit);
+      chassisBody.velocity.y *= 0.84;
+    }
     chassisBody.angularVelocity.x *= angularDamping;
     chassisBody.angularVelocity.z *= angularDamping;
 
