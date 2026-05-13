@@ -260,6 +260,18 @@ button {
 
 .garage-preview-amg::before {
   border-bottom: 10px solid #8ee337;
+  background:
+    linear-gradient(90deg, transparent 0 12%, rgba(5, 7, 7, 0.95) 13% 18%, transparent 19% 81%, rgba(5, 7, 7, 0.95) 82% 87%, transparent 88%),
+    linear-gradient(90deg, transparent 0 24%, #8ee337 25% 63%, transparent 64%),
+    linear-gradient(180deg, var(--car-body, #4b5554), #303735 74%, #111415 75%);
+}
+
+.garage-preview-amg::after {
+  background: linear-gradient(180deg, #11191b, #050707);
+  box-shadow:
+    84px 42px 0 -16px #050707,
+    118px 20px 0 -20px #050707,
+    -80px 46px 0 -18px #050707;
 }
 
 .garage-preview span,
