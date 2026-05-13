@@ -52,7 +52,7 @@ const START_HEIGHT = START_GROUND_Y + WHEEL_RADIUS + SUSPENSION_REST_LENGTH - WH
 const START_POSITION = new CANNON.Vec3(START_X, START_HEIGHT, START_Z);
 const TRACK_SURFACE_OFFSET = 0.065;
 const MAX_FORWARD_SPEED = 200 / 3.6;
-const MAX_REVERSE_SPEED = 20 / 3.6;
+const MAX_REVERSE_SPEED = 35 / 3.6;
 const HIGH_SPEED_UNDERSTEER_START = 190 / 3.6;
 const STEERING_RESPONSE = 2.55;
 const STEERING_RETURN_RESPONSE = 3.85;
@@ -2576,7 +2576,7 @@ function bindInput() {
 
 function updateMouseSteer(clientX) {
   const normalized = (clientX / Math.max(window.innerWidth, 1) - 0.5) * 2;
-  mouseControls.steer = THREE.MathUtils.clamp(-normalized * 1.08, -1, 1);
+  mouseControls.steer = THREE.MathUtils.clamp(-normalized, -1, 1);
 }
 
 function setMouseControlsEnabled(enabled) {
@@ -2874,8 +2874,9 @@ function updateControls(delta) {
   rightVector.normalize();
 
   const wasGrounded = vehicleDynamics.grounded;
-  const grounded = isVehicleGrounded();
-  const groundNormal = getTerrainNormal(chassisBody.position.x, chassisBody.position.z);
+  const groundContactInfo = getGroundContactInfo();
+  const grounded = groundContactInfo.groundedWheels > 0;
+  const groundNormal = groundContactInfo.normal;
   const surfaceForward = grounded ? projectOntoTerrain(forward, groundNormal) : forward;
   const surfaceRight = grounded ? projectOntoTerrain(rightVector, groundNormal) : rightVector;
   const signedSpeed = chassisBody.velocity.dot(surfaceForward);
@@ -2911,8 +2912,10 @@ function updateControls(delta) {
   const targetSteer = rawSteerInput * steerLimit;
   const steerDemandChange = Math.abs(targetSteer - steering) / Math.max(steerLimit, 0.001);
   const steeringResponse =
-    (targetSteer === 0 ? STEERING_RETURN_RESPONSE : STEERING_RESPONSE) *
-    THREE.MathUtils.lerp(1, 0.84, speedSteerFactor);
+    mouseControls.enabled
+      ? THREE.MathUtils.lerp(30, 22, speedSteerFactor)
+      : (targetSteer === 0 ? STEERING_RETURN_RESPONSE : STEERING_RESPONSE) *
+        THREE.MathUtils.lerp(1, 0.84, speedSteerFactor);
   steering = THREE.MathUtils.lerp(steering, targetSteer, 1 - Math.exp(-steeringResponse * delta));
 
   const steeringLoad = Math.abs(steering) / Math.max(steerLimit, 0.001);
@@ -2943,14 +2946,14 @@ function updateControls(delta) {
 
   let frontBrake = 0;
   let rearBrake = 0;
-  const targetDriveInput = throttle ? 1 : reverse ? -0.72 : 0;
-  const driveRamp = targetDriveInput === 0 ? 4.4 : 0.76;
+  const targetDriveInput = throttle ? 1 : reverse ? -0.88 : 0;
+  const driveRamp = targetDriveInput === 0 ? 4.4 : reverse ? 1.1 : 0.76;
   driveInput = approach(driveInput, targetDriveInput, driveRamp * delta);
   updateLaunchTraction(throttle, signedSpeed, delta);
   let braking = false;
 
   const maxDriveForce = 23500;
-  const maxReverseForce = 6400;
+  const maxReverseForce = 8200;
   const maxWheelEngineForce = 7600;
   let centerDriveForce = 0;
   let wheelEngineForce = 0;
@@ -2984,8 +2987,8 @@ function updateControls(delta) {
       driveInput = Math.min(driveInput, 0);
       braking = true;
     } else if (reverse && signedSpeed > -MAX_REVERSE_SPEED) {
-      centerDriveForce = maxReverseForce * 0.52 * driveInput;
-      wheelEngineForce = -maxWheelEngineForce * 0.76 * driveInput;
+      centerDriveForce = maxReverseForce * 0.62 * driveInput;
+      wheelEngineForce = -maxWheelEngineForce * 0.92 * driveInput;
     }
   }
 
@@ -3016,6 +3019,8 @@ function updateControls(delta) {
   vehicle.applyEngineForce(wheelEngineForce * 0.18, 1);
   vehicle.applyEngineForce(wheelEngineForce * 0.82, 2);
   vehicle.applyEngineForce(wheelEngineForce * 0.82, 3);
+
+  applyLiftedWheelDrop(delta, groundContactInfo);
 
   if (grounded) {
     applyCenteredDriveForce(surfaceForward, centerDriveForce);
@@ -3168,6 +3173,40 @@ function applyDriftAssist(forward, rightVector, signedSpeed, delta) {
   chassisBody.velocity.z += rightVector.z * (sideSlipTarget - lateralSpeed) * sideSlipBlend;
   chassisBody.angularVelocity.x *= 1 - Math.min(delta * 1.8, 0.08);
   chassisBody.angularVelocity.z *= 1 - Math.min(delta * 1.8, 0.08);
+}
+
+function applyLiftedWheelDrop(delta, contactInfo) {
+  const liftedWheels = vehicle.wheelInfos.length - contactInfo.groundedWheels;
+  if (liftedWheels <= 0) return;
+
+  const normal = contactInfo.normal;
+  const speedFactor = THREE.MathUtils.clamp(Math.abs(vehicleDynamics.signedSpeed) / getMaxForwardSpeed(), 0, 1);
+  const partialContact = contactInfo.groundedWheels > 0;
+  const baseDropForce = partialContact
+    ? THREE.MathUtils.lerp(13.5, 8.4, speedFactor)
+    : THREE.MathUtils.lerp(5.8, 4.2, speedFactor);
+  const contactMultiplier = partialContact ? 1.25 + liftedWheels * 0.18 : 0.72;
+  const forcePerWheel = (chassisBody.mass * baseDropForce * contactMultiplier) / liftedWheels;
+
+  for (let i = 0; i < vehicle.wheelInfos.length; i += 1) {
+    const wheel = vehicle.wheelInfos[i];
+    const contact = wheel.isInContact || wheel.raycastResult?.hasHit;
+    if (contact) continue;
+
+    const relativePoint = new CANNON.Vec3();
+    chassisBody.vectorToWorldFrame(wheel.chassisConnectionPointLocal, relativePoint);
+    const recentlyLiftedMultiplier = wheelVisualStates[i]?.contact ? 1.35 : 1;
+    const dropForce = forcePerWheel * recentlyLiftedMultiplier;
+
+    chassisBody.applyForce(
+      new CANNON.Vec3(
+        -normal.x * dropForce,
+        -Math.max(normal.y, 0.52) * dropForce,
+        -normal.z * dropForce,
+      ),
+      relativePoint,
+    );
+  }
 }
 
 function applyAntiWheelie(forward, groundNormal, signedSpeed, throttle, delta) {
