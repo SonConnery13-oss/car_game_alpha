@@ -52,7 +52,7 @@ const START_HEIGHT = START_GROUND_Y + WHEEL_RADIUS + SUSPENSION_REST_LENGTH - WH
 const START_POSITION = new CANNON.Vec3(START_X, START_HEIGHT, START_Z);
 const TRACK_SURFACE_OFFSET = 0.065;
 const MAX_FORWARD_SPEED = 200 / 3.6;
-const MAX_REVERSE_SPEED = 16;
+const MAX_REVERSE_SPEED = 20 / 3.6;
 const HIGH_SPEED_UNDERSTEER_START = 190 / 3.6;
 const STEERING_RESPONSE = 2.55;
 const STEERING_RETURN_RESPONSE = 3.85;
@@ -2491,6 +2491,10 @@ function bindInput() {
       return;
     }
 
+    if (mouseControls.enabled && isKeyboardDrivingControlKey(event.code)) {
+      return;
+    }
+
     keys.add(event.code);
 
     if (event.code === "KeyR") resetCar();
@@ -2572,7 +2576,7 @@ function bindInput() {
 
 function updateMouseSteer(clientX) {
   const normalized = (clientX / Math.max(window.innerWidth, 1) - 0.5) * 2;
-  mouseControls.steer = THREE.MathUtils.clamp(normalized * 1.08, -1, 1);
+  mouseControls.steer = THREE.MathUtils.clamp(-normalized * 1.08, -1, 1);
 }
 
 function setMouseControlsEnabled(enabled) {
@@ -2842,6 +2846,19 @@ function isDrivingKey(code) {
   ].includes(code);
 }
 
+function isKeyboardDrivingControlKey(code) {
+  return [
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "KeyW",
+    "KeyA",
+    "KeyS",
+    "KeyD",
+  ].includes(code);
+}
+
 function updateControls(delta) {
   const tuning = getCarTuning();
   const maxForwardSpeed = getMaxForwardSpeed();
@@ -2870,13 +2887,14 @@ function updateControls(delta) {
     applyTakeoffDynamics(delta);
   }
 
-  const left = keys.has("KeyA") || keys.has("ArrowLeft");
-  const right = keys.has("KeyD") || keys.has("ArrowRight");
-  const keyboardThrottle = keys.has("KeyW") || keys.has("ArrowUp");
-  const keyboardBrakeReverse = keys.has("KeyS") || keys.has("ArrowDown");
+  const keyboardDrivingEnabled = !mouseControls.enabled;
+  const left = keyboardDrivingEnabled && (keys.has("KeyA") || keys.has("ArrowLeft"));
+  const right = keyboardDrivingEnabled && (keys.has("KeyD") || keys.has("ArrowRight"));
+  const keyboardThrottle = keyboardDrivingEnabled && (keys.has("KeyW") || keys.has("ArrowUp"));
+  const keyboardBrakeReverse = keyboardDrivingEnabled && (keys.has("KeyS") || keys.has("ArrowDown"));
   const throttle = keyboardThrottle || (mouseControls.enabled && mouseControls.leftDown);
   const mouseBrake = mouseControls.enabled && mouseControls.rightDown;
-  const reverse = keyboardBrakeReverse && !mouseBrake;
+  const reverse = keyboardBrakeReverse || mouseBrake;
   const brakeInput = mouseBrake || keyboardBrakeReverse;
   const handbrake = keys.has("Space");
   const driftKey = keys.has("ShiftLeft") || keys.has("ShiftRight");
@@ -2886,7 +2904,7 @@ function updateControls(delta) {
   const steerLimit = THREE.MathUtils.lerp(0.52, 0.18, speedSteerFactor);
   const keyboardSteerInput = (left ? 1 : 0) + (right ? -1 : 0);
   const rawSteerInput = THREE.MathUtils.clamp(
-    mouseControls.enabled ? mouseControls.steer + keyboardSteerInput * 0.35 : keyboardSteerInput,
+    mouseControls.enabled ? mouseControls.steer : keyboardSteerInput,
     -1,
     1,
   );
@@ -2925,7 +2943,7 @@ function updateControls(delta) {
 
   let frontBrake = 0;
   let rearBrake = 0;
-  const targetDriveInput = throttle ? 1 : reverse ? -0.55 : 0;
+  const targetDriveInput = throttle ? 1 : reverse ? -0.72 : 0;
   const driveRamp = targetDriveInput === 0 ? 4.4 : 0.76;
   driveInput = approach(driveInput, targetDriveInput, driveRamp * delta);
   updateLaunchTraction(throttle, signedSpeed, delta);
@@ -2959,15 +2977,15 @@ function updateControls(delta) {
   }
 
   if (brakeInput) {
-    if (Math.abs(signedSpeed) > 1.7 || mouseBrake) {
-      const brakingSpeed = Math.abs(signedSpeed);
+    if (signedSpeed > 1.7) {
+      const brakingSpeed = signedSpeed;
       frontBrake = Math.min(30, 13 + brakingSpeed * 0.36) * tuning.brakeScale;
       rearBrake = Math.min(24, 10 + brakingSpeed * 0.28) * tuning.brakeScale;
       driveInput = Math.min(driveInput, 0);
       braking = true;
     } else if (reverse && signedSpeed > -MAX_REVERSE_SPEED) {
-      centerDriveForce = maxReverseForce * 0.25 * driveInput;
-      wheelEngineForce = -maxWheelEngineForce * 0.5 * driveInput;
+      centerDriveForce = maxReverseForce * 0.52 * driveInput;
+      wheelEngineForce = -maxWheelEngineForce * 0.76 * driveInput;
     }
   }
 
@@ -3929,7 +3947,11 @@ function updateHud() {
 }
 
 function estimateGear(kmh) {
-  const reverseInput = keys.has("KeyS") || keys.has("ArrowDown");
+  const reverseInput =
+    (!mouseControls.enabled && (keys.has("KeyS") || keys.has("ArrowDown"))) ||
+    (mouseControls.enabled && mouseControls.rightDown) ||
+    driveInput < -0.05 ||
+    vehicleDynamics.reverse;
   if (reverseInput && kmh < 24) return "R";
   if (kmh < 3) return "N";
   if (kmh < 42) return "1";
