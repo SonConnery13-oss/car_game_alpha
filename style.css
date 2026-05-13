@@ -210,6 +210,8 @@ button {
   min-height: 160px;
   border-radius: 8px;
   background:
+    radial-gradient(circle at 27% 76%, #090b0c 0 13px, #cfd8da 14px 17px, #101315 18px 26px, transparent 27px),
+    radial-gradient(circle at 73% 76%, #090b0c 0 13px, #cfd8da 14px 17px, #101315 18px 26px, transparent 27px),
     linear-gradient(180deg, transparent 0 57%, rgba(255, 255, 255, 0.12) 58% 60%, transparent 61%),
     radial-gradient(ellipse at 50% 78%, rgba(0, 0, 0, 0.62), transparent 43%),
     linear-gradient(135deg, #2d3436, #101415);
@@ -256,6 +258,10 @@ button {
 
 .garage-preview-gt3::before {
   border-bottom: 10px solid #c83228;
+  background:
+    linear-gradient(90deg, transparent 0 16%, rgba(8, 10, 11, 0.92) 17% 22%, transparent 23% 78%, rgba(8, 10, 11, 0.92) 79% 84%, transparent 85%),
+    linear-gradient(90deg, transparent 0 24%, #c83228 25% 62%, transparent 63%),
+    linear-gradient(180deg, var(--car-body, #dce8ed), #b7c5cb 74%, #111416 75%);
 }
 
 .garage-preview-amg::before {
@@ -272,6 +278,12 @@ button {
     84px 42px 0 -16px #050707,
     118px 20px 0 -20px #050707,
     -80px 46px 0 -18px #050707;
+}
+
+.garage-preview-gt3::after {
+  box-shadow:
+    78px 43px 0 -17px #101315,
+    -82px 44px 0 -18px #101315;
 }
 
 .garage-preview span,
@@ -396,6 +408,61 @@ button {
   transform: translateX(2px);
 }
 
+.menu-return-button {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  z-index: 9;
+  min-width: 76px;
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(11, 17, 22, 0.72);
+  color: #ffffff;
+  font-weight: 900;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.menu-return-button:hover,
+.menu-return-button:focus-visible {
+  border-color: rgba(167, 255, 91, 0.78);
+  outline: none;
+}
+
+.controls-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 42px;
+  z-index: 11;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(130px, 1fr));
+  gap: 8px 16px;
+  width: min(92vw, 560px);
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(8, 12, 14, 0.74);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.32);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.82rem;
+  font-weight: 800;
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.controls-hint strong {
+  grid-column: 1 / -1;
+  color: #a7ff5b;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
+.controls-hint[hidden],
+.menu-return-button[hidden] {
+  display: none;
+}
+
 .message {
   position: absolute;
   left: 50%;
@@ -505,5 +572,17 @@ button {
   .icon-button {
     right: 10px;
     bottom: 10px;
+  }
+
+  .menu-return-button {
+    left: 10px;
+    top: 10px;
+  }
+
+  .controls-hint {
+    bottom: 68px;
+    grid-template-columns: minmax(0, 1fr);
+    width: calc(100vw - 20px);
+    font-size: 0.76rem;
   }
 }

@@ -19,6 +19,8 @@ const selectedCarName = document.querySelector("#selectedCarName");
 const selectedCarImage = document.querySelector("#selectedCarImage");
 const garageOptions = document.querySelectorAll("[data-car-id]");
 const menuBackButtons = document.querySelectorAll("[data-menu-back]");
+const menuReturnButton = document.querySelector("#menuReturnButton");
+const controlsHint = document.querySelector("#controlsHint");
 
 const ROAD_WIDTH = 14;
 const TRACK_RADIUS = 30;
@@ -91,11 +93,51 @@ const CAR_MODELS = {
     name: "GT3 RS Prototype",
     previewClass: "garage-preview-gt3",
     rimColor: 0xc52d22,
+    tuning: {
+      maxForwardSpeed: 200 / 3.6,
+      highSpeedUndersteerStart: 190 / 3.6,
+      frictionSlip: BASE_WHEEL_FRICTION_SLIP,
+      suspensionStiffness: 215,
+      dampingRelaxation: DAMPER_SETTINGS.rebound,
+      dampingCompression: DAMPER_SETTINGS.compression,
+      maxSuspensionForce: 170000,
+      maxSuspensionTravel: 0.16,
+      rollInfluence: 0.00028,
+      gripScale: 1,
+      driveForceScale: 1,
+      wheelForceScale: 1,
+      brakeScale: 1,
+      downforceScale: 1,
+      damperScale: 1,
+      bumpStopScale: 1,
+      visualStiffnessScale: 1,
+      visualDampingScale: 1,
+    },
   },
   amg: {
     name: "AMG GT Track",
     previewClass: "garage-preview-amg",
     rimColor: 0x3c403d,
+    tuning: {
+      maxForwardSpeed: 210 / 3.6,
+      highSpeedUndersteerStart: 195 / 3.6,
+      frictionSlip: 5.25,
+      suspensionStiffness: 188,
+      dampingRelaxation: 6.2,
+      dampingCompression: 12.4,
+      maxSuspensionForce: 154000,
+      maxSuspensionTravel: 0.18,
+      rollInfluence: 0.00036,
+      gripScale: 0.9,
+      driveForceScale: 1.04,
+      wheelForceScale: 0.96,
+      brakeScale: 0.96,
+      downforceScale: 0.95,
+      damperScale: 0.9,
+      bumpStopScale: 0.88,
+      visualStiffnessScale: 0.92,
+      visualDampingScale: 0.9,
+    },
   },
 };
 
@@ -203,6 +245,17 @@ const cameraRig = {
   lookTarget: new THREE.Vector3(),
   forward: new THREE.Vector3(0, 0, 1),
 };
+const cameraOrbit = {
+  active: false,
+  yaw: 0,
+  pitch: 0.26,
+};
+const mouseControls = {
+  enabled: false,
+  steer: 0,
+  leftDown: false,
+  rightDown: false,
+};
 const carVisualMotion = {
   initialized: false,
   position: new THREE.Vector3(),
@@ -231,6 +284,8 @@ let bestLap = null;
 let lastLapStamp = 0;
 let readyTimeout = null;
 let pauseStartedAt = null;
+let raceCountdownActive = false;
+let raceCountdownToken = 0;
 
 setupLighting();
 createWorld();
@@ -1484,6 +1539,14 @@ function createClouds() {
   }
 }
 
+function getCarTuning() {
+  return CAR_MODELS[selectedCarId]?.tuning ?? CAR_MODELS.gt3.tuning;
+}
+
+function getMaxForwardSpeed() {
+  return getCarTuning().maxForwardSpeed ?? MAX_FORWARD_SPEED;
+}
+
 function createVehicle() {
   const chassisShape = new CANNON.Box(new CANNON.Vec3(1.05, 0.34, 2.05));
   const chassisBody = new CANNON.Body({
@@ -1502,18 +1565,19 @@ function createVehicle() {
     indexForwardAxis: 2,
   });
 
+  const tuning = getCarTuning();
   const wheelOptions = {
     radius: WHEEL_RADIUS,
     directionLocal: new CANNON.Vec3(0, -1, 0),
-    suspensionStiffness: 215,
+    suspensionStiffness: tuning.suspensionStiffness,
     suspensionRestLength: SUSPENSION_REST_LENGTH,
-    frictionSlip: BASE_WHEEL_FRICTION_SLIP,
-    dampingRelaxation: DAMPER_SETTINGS.rebound,
-    dampingCompression: DAMPER_SETTINGS.compression,
-    maxSuspensionForce: 170000,
-    rollInfluence: 0.00028,
+    frictionSlip: tuning.frictionSlip,
+    dampingRelaxation: tuning.dampingRelaxation,
+    dampingCompression: tuning.dampingCompression,
+    maxSuspensionForce: tuning.maxSuspensionForce,
+    rollInfluence: tuning.rollInfluence,
     axleLocal: new CANNON.Vec3(-1, 0, 0),
-    maxSuspensionTravel: 0.16,
+    maxSuspensionTravel: tuning.maxSuspensionTravel,
     customSlidingRotationalSpeed: -32,
     useCustomSlidingRotationalSpeed: true,
   };
@@ -2416,6 +2480,17 @@ function bindInput() {
       startGame();
       return;
     }
+    if (menuActive) return;
+
+    if (raceCountdownActive) {
+      return;
+    }
+
+    if (event.code === "KeyF" && !event.repeat && !menuActive) {
+      setMouseControlsEnabled(!mouseControls.enabled);
+      return;
+    }
+
     keys.add(event.code);
 
     if (event.code === "KeyR") resetCar();
@@ -2427,7 +2502,61 @@ function bindInput() {
     keys.delete(event.code);
   });
 
-  startButton.addEventListener("click", () => setPaused(!paused));
+  startButton.addEventListener("click", () => {
+    if (menuActive || raceCountdownActive) return;
+    setPaused(!paused);
+  });
+  menuReturnButton?.addEventListener("click", returnToMenu);
+
+  window.addEventListener("contextmenu", (event) => {
+    if (!menuActive) event.preventDefault();
+  });
+
+  canvas.addEventListener("mousedown", (event) => {
+    if (menuActive || raceCountdownActive) return;
+    event.preventDefault();
+
+    if (event.button === 0 && mouseControls.enabled) {
+      mouseControls.leftDown = true;
+      updateMouseSteer(event.clientX);
+    }
+
+    if (event.button === 2) {
+      if (mouseControls.enabled) {
+        mouseControls.rightDown = true;
+      } else {
+        cameraOrbit.active = true;
+        cameraOrbit.yaw = 0;
+        cameraOrbit.pitch = 0.26;
+      }
+    }
+  });
+
+  window.addEventListener("mouseup", (event) => {
+    if (event.button === 0) mouseControls.leftDown = false;
+    if (event.button === 2) {
+      mouseControls.rightDown = false;
+      cameraOrbit.active = false;
+    }
+  });
+
+  window.addEventListener("mousemove", (event) => {
+    if (mouseControls.enabled && !menuActive) {
+      updateMouseSteer(event.clientX);
+    }
+
+    if (cameraOrbit.active && !mouseControls.enabled && !menuActive) {
+      cameraOrbit.yaw -= event.movementX * 0.006;
+      cameraOrbit.pitch = THREE.MathUtils.clamp(cameraOrbit.pitch + event.movementY * 0.004, -0.35, 0.8);
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    mouseControls.leftDown = false;
+    mouseControls.rightDown = false;
+    cameraOrbit.active = false;
+    keys.clear();
+  });
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -2441,10 +2570,27 @@ function bindInput() {
   }, 1200);
 }
 
+function updateMouseSteer(clientX) {
+  const normalized = (clientX / Math.max(window.innerWidth, 1) - 0.5) * 2;
+  mouseControls.steer = THREE.MathUtils.clamp(normalized * 1.08, -1, 1);
+}
+
+function setMouseControlsEnabled(enabled) {
+  mouseControls.enabled = enabled;
+  mouseControls.leftDown = false;
+  mouseControls.rightDown = false;
+  cameraOrbit.active = false;
+  keys.clear();
+
+  if (!menuActive) {
+    flashMessage(enabled ? "MOUSE CONTROL" : "KEYBOARD CONTROL");
+  }
+}
+
 function setupMenu() {
   updateSelectedCarUi();
-  startButton.classList.toggle("is-running", !paused);
-  startButton.classList.toggle("is-paused", paused);
+  syncPauseButton();
+  if (menuReturnButton) menuReturnButton.hidden = true;
   message.textContent = "READY";
   message.classList.add("is-visible");
 
@@ -2462,12 +2608,15 @@ function setupMenu() {
 }
 
 function startGame() {
+  cancelRaceCountdown();
   menuActive = false;
   mainMenu?.classList.add("is-hidden");
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
+  if (menuReturnButton) menuReturnButton.hidden = false;
+  keys.clear();
   resetCar();
-  setPaused(false);
+  startPreRaceSequence();
 }
 
 function showMenuScreen(screen) {
@@ -2482,11 +2631,82 @@ function showMainMenu() {
   mainMenu?.classList.remove("is-hidden");
 }
 
+function returnToMenu() {
+  cancelRaceCountdown();
+  menuActive = true;
+  paused = true;
+  pauseStartedAt = null;
+  mouseControls.leftDown = false;
+  mouseControls.rightDown = false;
+  cameraOrbit.active = false;
+  syncPauseButton();
+  mainMenu?.classList.remove("is-hidden");
+  if (developersScreen) developersScreen.hidden = true;
+  if (garageScreen) garageScreen.hidden = true;
+  if (menuReturnButton) menuReturnButton.hidden = true;
+  window.clearTimeout(readyTimeout);
+  message.textContent = "READY";
+  message.classList.add("is-visible");
+}
+
+function cancelRaceCountdown() {
+  raceCountdownToken += 1;
+  raceCountdownActive = false;
+  controlsHint?.classList.remove("is-visible");
+  if (controlsHint) controlsHint.hidden = true;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function startPreRaceSequence() {
+  const token = ++raceCountdownToken;
+  raceCountdownActive = true;
+  paused = true;
+  pauseStartedAt = performance.now();
+  syncPauseButton();
+  window.clearTimeout(readyTimeout);
+
+  if (controlsHint) {
+    controlsHint.hidden = false;
+    controlsHint.classList.add("is-visible");
+  }
+
+  const steps = [
+    ["READY", 900],
+    ["1", 650],
+    ["2", 650],
+    ["3", 650],
+    ["START!", 520],
+  ];
+
+  for (const [text, duration] of steps) {
+    if (token !== raceCountdownToken) return;
+    message.textContent = text;
+    message.classList.add("is-visible");
+    await wait(duration);
+  }
+
+  if (token !== raceCountdownToken) return;
+  raceCountdownActive = false;
+  if (controlsHint) {
+    controlsHint.classList.remove("is-visible");
+    controlsHint.hidden = true;
+  }
+  paused = false;
+  pauseStartedAt = null;
+  lapStartedAt = performance.now();
+  syncPauseButton();
+  readyTimeout = window.setTimeout(() => message.classList.remove("is-visible"), 700);
+}
+
 function selectCar(carId) {
   if (!CAR_MODELS[carId]) return;
 
   selectedCarId = carId;
   replaceCarMesh();
+  applyVehicleTuning();
   updateWheelStyle();
   updateSelectedCarUi();
 }
@@ -2532,6 +2752,20 @@ function updateWheelStyle() {
         child.material.color.setHex(brakeColor);
       }
     });
+  }
+}
+
+function applyVehicleTuning() {
+  const tuning = getCarTuning();
+
+  for (const wheel of vehicle.wheelInfos) {
+    wheel.suspensionStiffness = tuning.suspensionStiffness;
+    wheel.dampingRelaxation = tuning.dampingRelaxation;
+    wheel.dampingCompression = tuning.dampingCompression;
+    wheel.maxSuspensionForce = tuning.maxSuspensionForce;
+    wheel.maxSuspensionTravel = tuning.maxSuspensionTravel;
+    wheel.rollInfluence = tuning.rollInfluence;
+    wheel.frictionSlip = tuning.frictionSlip;
   }
 }
 
@@ -2601,6 +2835,7 @@ function isDrivingKey(code) {
     "KeyS",
     "KeyD",
     "Space",
+    "KeyF",
     "ShiftLeft",
     "ShiftRight",
     "Enter",
@@ -2608,6 +2843,9 @@ function isDrivingKey(code) {
 }
 
 function updateControls(delta) {
+  const tuning = getCarTuning();
+  const maxForwardSpeed = getMaxForwardSpeed();
+  const highSpeedUndersteerStart = tuning.highSpeedUndersteerStart ?? HIGH_SPEED_UNDERSTEER_START;
   const forward = new CANNON.Vec3(0, 0, 1);
   chassisBody.vectorToWorldFrame(forward, forward);
   const rightVector = new CANNON.Vec3(1, 0, 0);
@@ -2634,15 +2872,24 @@ function updateControls(delta) {
 
   const left = keys.has("KeyA") || keys.has("ArrowLeft");
   const right = keys.has("KeyD") || keys.has("ArrowRight");
-  const throttle = keys.has("KeyW") || keys.has("ArrowUp");
-  const reverse = keys.has("KeyS") || keys.has("ArrowDown");
+  const keyboardThrottle = keys.has("KeyW") || keys.has("ArrowUp");
+  const keyboardBrakeReverse = keys.has("KeyS") || keys.has("ArrowDown");
+  const throttle = keyboardThrottle || (mouseControls.enabled && mouseControls.leftDown);
+  const mouseBrake = mouseControls.enabled && mouseControls.rightDown;
+  const reverse = keyboardBrakeReverse && !mouseBrake;
+  const brakeInput = mouseBrake || keyboardBrakeReverse;
   const handbrake = keys.has("Space");
   const driftKey = keys.has("ShiftLeft") || keys.has("ShiftRight");
 
   const absSpeed = Math.abs(signedSpeed);
-  const speedSteerFactor = smoothstep(10, MAX_FORWARD_SPEED, absSpeed);
+  const speedSteerFactor = smoothstep(10, maxForwardSpeed, absSpeed);
   const steerLimit = THREE.MathUtils.lerp(0.52, 0.18, speedSteerFactor);
-  const rawSteerInput = (left ? 1 : 0) + (right ? -1 : 0);
+  const keyboardSteerInput = (left ? 1 : 0) + (right ? -1 : 0);
+  const rawSteerInput = THREE.MathUtils.clamp(
+    mouseControls.enabled ? mouseControls.steer + keyboardSteerInput * 0.35 : keyboardSteerInput,
+    -1,
+    1,
+  );
   const targetSteer = rawSteerInput * steerLimit;
   const steerDemandChange = Math.abs(targetSteer - steering) / Math.max(steerLimit, 0.001);
   const steeringResponse =
@@ -2651,8 +2898,8 @@ function updateControls(delta) {
   steering = THREE.MathUtils.lerp(steering, targetSteer, 1 - Math.exp(-steeringResponse * delta));
 
   const steeringLoad = Math.abs(steering) / Math.max(steerLimit, 0.001);
-  const highSpeedSlip = smoothstep(HIGH_SPEED_UNDERSTEER_START, MAX_FORWARD_SPEED, absSpeed);
-  const midSpeedSlip = smoothstep(34, HIGH_SPEED_UNDERSTEER_START, absSpeed);
+  const highSpeedSlip = smoothstep(highSpeedUndersteerStart, maxForwardSpeed, absSpeed);
+  const midSpeedSlip = smoothstep(34, highSpeedUndersteerStart, absSpeed);
   const driftTarget = driftKey && grounded && absSpeed > 5 ? 1 : 0;
   driftAmount = approach(driftAmount, driftTarget, (driftTarget > driftAmount ? 6.2 : 5.0) * delta);
   const targetSlip = THREE.MathUtils.clamp(
@@ -2690,34 +2937,41 @@ function updateControls(delta) {
   let centerDriveForce = 0;
   let wheelEngineForce = 0;
 
-  if (driveInput > 0 && signedSpeed < MAX_FORWARD_SPEED) {
+  if (driveInput > 0 && signedSpeed < maxForwardSpeed) {
     const speedFade = THREE.MathUtils.lerp(
       1,
       0.5,
-      THREE.MathUtils.clamp(Math.max(signedSpeed, 0) / MAX_FORWARD_SPEED, 0, 1),
+      THREE.MathUtils.clamp(Math.max(signedSpeed, 0) / maxForwardSpeed, 0, 1),
     );
     centerDriveForce =
       maxDriveForce *
       0.46 *
+      tuning.driveForceScale *
       driveInput *
       speedFade *
       THREE.MathUtils.lerp(0.56, 1, tractionGrip);
-    wheelEngineForce = -maxWheelEngineForce * driveInput * speedFade * (1 - tireSlip * 0.34);
+    wheelEngineForce =
+      -maxWheelEngineForce *
+      tuning.wheelForceScale *
+      driveInput *
+      speedFade *
+      (1 - tireSlip * 0.34);
   }
 
-  if (reverse) {
-    if (signedSpeed > 1.7) {
-      frontBrake = Math.min(30, 13 + signedSpeed * 0.36);
-      rearBrake = Math.min(24, 10 + signedSpeed * 0.28);
+  if (brakeInput) {
+    if (Math.abs(signedSpeed) > 1.7 || mouseBrake) {
+      const brakingSpeed = Math.abs(signedSpeed);
+      frontBrake = Math.min(30, 13 + brakingSpeed * 0.36) * tuning.brakeScale;
+      rearBrake = Math.min(24, 10 + brakingSpeed * 0.28) * tuning.brakeScale;
       driveInput = Math.min(driveInput, 0);
       braking = true;
-    } else if (signedSpeed > -MAX_REVERSE_SPEED) {
+    } else if (reverse && signedSpeed > -MAX_REVERSE_SPEED) {
       centerDriveForce = maxReverseForce * 0.25 * driveInput;
       wheelEngineForce = -maxWheelEngineForce * 0.5 * driveInput;
     }
   }
 
-  if (!throttle && !reverse) {
+  if (!throttle && !reverse && !brakeInput) {
     frontBrake = 0.22;
     rearBrake = 0.22;
   }
@@ -2755,7 +3009,7 @@ function updateControls(delta) {
     applyDriftAssist(surfaceForward, surfaceRight, signedSpeed, delta);
     applyDamperStabilization(delta);
 
-    const downForce = Math.min(speed * speed * 2.45, 4800);
+    const downForce = Math.min(speed * speed * 2.45 * tuning.downforceScale, 4800);
     chassisBody.applyForce(
       new CANNON.Vec3(-groundNormal.x * downForce, -groundNormal.y * downForce, -groundNormal.z * downForce),
       CENTER_OF_MASS,
@@ -2777,6 +3031,7 @@ function approach(current, target, amount) {
 }
 
 function updateLaunchTraction(throttle, signedSpeed, delta) {
+  const tuning = getCarTuning();
   const launchIntensity = THREE.MathUtils.clamp(Math.abs(driveInput), 0, 1);
   const speedRecovery = THREE.MathUtils.clamp(Math.abs(signedSpeed) / 13, 0, 1);
   const hardLaunch = throttle && launchIntensity > 0.45 && Math.abs(signedSpeed) < 13;
@@ -2787,7 +3042,7 @@ function updateLaunchTraction(throttle, signedSpeed, delta) {
 
   tractionGrip = approach(tractionGrip, targetGrip, rate * delta);
 
-  const wheelFriction = BASE_WHEEL_FRICTION_SLIP * THREE.MathUtils.lerp(0.46, 1, tractionGrip);
+  const wheelFriction = tuning.frictionSlip * tuning.gripScale * THREE.MathUtils.lerp(0.46, 1, tractionGrip);
   for (let i = 0; i < vehicle.wheelInfos.length; i += 1) {
     const driftGripLoss = driftAmount * 0.5;
     const frontSlipLoss = i < 2 ? tireSlip * 0.1 : tireSlip * 0.04;
@@ -2810,11 +3065,14 @@ function applyCenteredDriveForce(forward, force) {
 }
 
 function applyArcadeGrip(forward, rightVector, signedSpeed, delta) {
+  const tuning = getCarTuning();
+  const maxForwardSpeed = getMaxForwardSpeed();
   const lateralSpeed = chassisBody.velocity.dot(rightVector);
-  const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
+  const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / maxForwardSpeed, 0, 1);
   const lateralGrip =
     THREE.MathUtils.clamp(delta * THREE.MathUtils.lerp(7.8, 5.3, speedFactor), 0, 0.4) *
     THREE.MathUtils.lerp(0.38, 1, tractionGrip) *
+    tuning.gripScale *
     (1 - tireSlip * 0.14);
   chassisBody.velocity.x -= rightVector.x * lateralSpeed * lateralGrip;
   chassisBody.velocity.y -= rightVector.y * lateralSpeed * lateralGrip;
@@ -2823,7 +3081,7 @@ function applyArcadeGrip(forward, rightVector, signedSpeed, delta) {
   const steeringSlide =
     steering *
     tireSlip *
-    smoothstep(16, MAX_FORWARD_SPEED, Math.abs(signedSpeed)) *
+    smoothstep(16, maxForwardSpeed, Math.abs(signedSpeed)) *
     Math.abs(signedSpeed) *
     delta *
     0.07;
@@ -2847,6 +3105,7 @@ function applyArcadeGrip(forward, rightVector, signedSpeed, delta) {
 }
 
 function applyYawAssist(signedSpeed, delta) {
+  const tuning = getCarTuning();
   const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / 14, 0, 1);
   const launchFactor = THREE.MathUtils.clamp(Math.abs(driveInput) * (1 - speedFactor), 0, 1);
   const direction = signedSpeed >= 0 ? 1 : -1;
@@ -2854,6 +3113,7 @@ function applyYawAssist(signedSpeed, delta) {
   const yawAssist =
     (speedFactor * 1.18 + launchFactor * 0.72) *
     THREE.MathUtils.lerp(0.72, 1, tractionGrip) *
+    tuning.gripScale *
     (1 - tireSlip * 0.12 + driftAmount * 0.58);
   chassisBody.angularVelocity.y += steering * yawAssist * direction * reverseDirection * delta * 1.32;
   chassisBody.angularVelocity.x *= 0.96;
@@ -2863,7 +3123,7 @@ function applyYawAssist(signedSpeed, delta) {
 function applyAccelerationStability(throttle, signedSpeed, delta) {
   if (!throttle || driveInput < 0.08) return;
 
-  const speedFactor = THREE.MathUtils.clamp(Math.max(signedSpeed, 0) / MAX_FORWARD_SPEED, 0, 1);
+  const speedFactor = THREE.MathUtils.clamp(Math.max(signedSpeed, 0) / getMaxForwardSpeed(), 0, 1);
   const damping = THREE.MathUtils.clamp(delta * (3.2 + driveInput * 2.6) * (1 - speedFactor * 0.35), 0, 0.13);
   chassisBody.angularVelocity.x *= 1 - damping * 0.45;
   chassisBody.angularVelocity.z *= 1 - damping * 0.45;
@@ -2878,7 +3138,7 @@ function applyDriftAssist(forward, rightVector, signedSpeed, delta) {
 
   const lateralSpeed = chassisBody.velocity.dot(rightVector);
   const steerDirection = Math.sign(steering || lateralSpeed || 1);
-  const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
+  const speedFactor = THREE.MathUtils.clamp(Math.abs(signedSpeed) / getMaxForwardSpeed(), 0, 1);
   const driftSpeed = THREE.MathUtils.clamp(Math.abs(signedSpeed) / 12, 0, 1);
   const naturalYawRate = steerDirection * driftAmount * driftSpeed * (1.8 + speedFactor * 2.9);
   const yawBlend = THREE.MathUtils.clamp(delta * (3.8 + speedFactor * 3.1), 0, 0.24);
@@ -2912,7 +3172,7 @@ function applyAntiWheelie(forward, groundNormal, signedSpeed, throttle, delta) {
 function applyBrakeAssist(forward, signedSpeed, delta, braking) {
   if (!braking) return;
 
-  const brakeDeceleration = 5.2 + Math.min(Math.abs(signedSpeed) * 0.18, 9.5);
+  const brakeDeceleration = (5.2 + Math.min(Math.abs(signedSpeed) * 0.18, 9.5)) * getCarTuning().brakeScale;
   const speedReduction = Math.min(Math.abs(signedSpeed), brakeDeceleration * delta);
   const direction = Math.sign(signedSpeed);
 
@@ -2976,7 +3236,7 @@ function applyGroundConformity(delta, contactInfo) {
 
   correctionAxis.scale(1 / axisLength, correctionAxis);
   const error = Math.asin(THREE.MathUtils.clamp(axisLength, -1, 1));
-  const speedFactor = THREE.MathUtils.clamp(Math.abs(vehicleDynamics.signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
+  const speedFactor = THREE.MathUtils.clamp(Math.abs(vehicleDynamics.signedSpeed) / getMaxForwardSpeed(), 0, 1);
   const contactGain = THREE.MathUtils.clamp(contactInfo.groundedWheels / 2, 0.35, 1);
   const response = THREE.MathUtils.lerp(13.5, 7.2, speedFactor) * contactGain;
   const damping = THREE.MathUtils.lerp(2.5, 1.25, speedFactor) * contactGain;
@@ -2997,6 +3257,7 @@ function crossCannonVectors(a, b) {
 }
 
 function applyDamperStabilization(delta) {
+  const tuning = getCarTuning();
   const contactInfo = getGroundContactInfo();
   const groundedWheels = contactInfo.groundedWheels;
   if (groundedWheels === 0) return;
@@ -3006,11 +3267,15 @@ function applyDamperStabilization(delta) {
   const groundNormal = contactInfo.normal;
   const heightAboveGround = chassisBody.position.y - groundY;
   const pitchRollBlend = THREE.MathUtils.clamp(
-    delta * DAMPER_SETTINGS.chassisPitchRoll * 3.2 * contactRatio,
+    delta * DAMPER_SETTINGS.chassisPitchRoll * tuning.damperScale * 3.2 * contactRatio,
     0,
     0.07,
   );
-  const heaveBlend = THREE.MathUtils.clamp(delta * DAMPER_SETTINGS.heave * 5.6 * contactRatio, 0, 0.1);
+  const heaveBlend = THREE.MathUtils.clamp(
+    delta * DAMPER_SETTINGS.heave * tuning.damperScale * 5.6 * contactRatio,
+    0,
+    0.1,
+  );
 
   applyBumpStop(groundNormal, heightAboveGround, contactRatio);
   applyTunedMassDamper(delta, contactRatio);
@@ -3030,10 +3295,11 @@ function applyDamperStabilization(delta) {
 }
 
 function applyBumpStop(groundNormal, heightAboveGround, contactRatio) {
+  const tuning = getCarTuning();
   const compression = DAMPER_SETTINGS.bumpStopStart - heightAboveGround;
   if (compression <= 0) return;
 
-  const force = compression * DAMPER_SETTINGS.bumpStopStrength * chassisBody.mass * contactRatio;
+  const force = compression * DAMPER_SETTINGS.bumpStopStrength * tuning.bumpStopScale * chassisBody.mass * contactRatio;
   chassisBody.applyForce(
     new CANNON.Vec3(groundNormal.x * force, groundNormal.y * force, groundNormal.z * force),
     CENTER_OF_MASS,
@@ -3067,8 +3333,10 @@ function applyTunedMassDamper(delta, contactRatio) {
 }
 
 function applySpeedLimit(forward, signedSpeed) {
-  if (signedSpeed > MAX_FORWARD_SPEED) {
-    const excess = signedSpeed - MAX_FORWARD_SPEED;
+  const maxForwardSpeed = getMaxForwardSpeed();
+
+  if (signedSpeed > maxForwardSpeed) {
+    const excess = signedSpeed - maxForwardSpeed;
     chassisBody.velocity.x -= forward.x * excess;
     chassisBody.velocity.y -= forward.y * excess;
     chassisBody.velocity.z -= forward.z * excess;
@@ -3396,6 +3664,7 @@ function updateSuspensionVisual(delta) {
   const visualRoot = carGroup.getObjectByName("carVisualRoot");
   if (!visualRoot) return;
 
+  const tuning = getCarTuning();
   const dt = Math.max(delta, 1 / 120);
   const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
   const highSpeedSuppression = THREE.MathUtils.lerp(0.58, 0.2, smoothstep(16, 70, speedAbs));
@@ -3447,7 +3716,7 @@ function updateSuspensionVisual(delta) {
   const rearCompression = (compression[2] + compression[3]) * 0.5;
   const leftCompression = (compression[0] + compression[2]) * 0.5;
   const rightCompression = (compression[1] + compression[3]) * 0.5;
-  const speedFactor = THREE.MathUtils.clamp(speedAbs / 34, 0, 1);
+  const speedFactor = THREE.MathUtils.clamp(speedAbs / Math.min(getMaxForwardSpeed(), 34), 0, 1);
   const highSpeedLeanGain = THREE.MathUtils.lerp(0.72, 0.3, smoothstep(34, 78, speedAbs));
   const roadShakeSpeedGain =
     smoothstep(3, 24, speedAbs) * THREE.MathUtils.lerp(0.38, 0.08, smoothstep(34, 76, speedAbs));
@@ -3472,7 +3741,9 @@ function updateSuspensionVisual(delta) {
     VISUAL_SUSPENSION.roadShake *
     (surfaceShake + Math.sin(time * 24) * 0.44 + Math.sin(time * 47) * 0.28);
   const airborneSag = grounded ? 0 : -0.025;
-  const targetHeave = -averageCompression * VISUAL_SUSPENSION.heaveScale + roadShake + airborneSag;
+  const targetHeave =
+    (-averageCompression * VISUAL_SUSPENSION.heaveScale + roadShake + airborneSag) *
+    (2 - tuning.visualStiffnessScale);
   const targetPitch =
     (frontCompression - rearCompression) * VISUAL_SUSPENSION.pitchScale +
     brakeDive +
@@ -3537,10 +3808,11 @@ function updateDamperVisuals(visualRoot) {
 }
 
 function springValue(state, key, target, delta) {
+  const tuning = getCarTuning();
   const velocityKey = `${key}Velocity`;
   const displacement = target - state[key];
-  state[velocityKey] += displacement * VISUAL_SUSPENSION.stiffness * delta;
-  state[velocityKey] *= Math.exp(-VISUAL_SUSPENSION.damping * delta);
+  state[velocityKey] += displacement * VISUAL_SUSPENSION.stiffness * tuning.visualStiffnessScale * delta;
+  state[velocityKey] *= Math.exp(-VISUAL_SUSPENSION.damping * tuning.visualDampingScale * delta);
   state[key] += state[velocityKey] * delta;
 }
 
@@ -3580,7 +3852,7 @@ function updateCamera(delta) {
     cameraRig.forward.copy(horizontalForward);
   }
 
-  const speedFactor = THREE.MathUtils.clamp(Math.abs(vehicleDynamics.signedSpeed) / MAX_FORWARD_SPEED, 0, 1);
+  const speedFactor = THREE.MathUtils.clamp(Math.abs(vehicleDynamics.signedSpeed) / getMaxForwardSpeed(), 0, 1);
   const focusBlend = 1 - Math.exp(-(10.5 + speedFactor * 5.5) * delta);
   const forwardBlend = 1 - Math.exp(-(6.5 + speedFactor * 5.5) * delta);
   cameraRig.focus.lerp(focusTarget, focusBlend);
@@ -3591,7 +3863,20 @@ function updateCamera(delta) {
   let desiredPosition;
   let lookTarget;
 
-  if (cameraMode === 0) {
+  if (cameraMode === 0 && cameraOrbit.active && !mouseControls.enabled) {
+    const distance = THREE.MathUtils.lerp(8.0, 7.0, speedFactor);
+    const height = THREE.MathUtils.lerp(3.7, 4.55, speedFactor);
+    const baseBackYaw = Math.atan2(-cameraRig.forward.x, -cameraRig.forward.z);
+    const yaw = baseBackYaw + cameraOrbit.yaw;
+    const horizontalDistance = distance * Math.cos(cameraOrbit.pitch);
+    const orbitOffset = new THREE.Vector3(
+      Math.sin(yaw) * horizontalDistance,
+      height + Math.sin(cameraOrbit.pitch) * distance,
+      Math.cos(yaw) * horizontalDistance,
+    );
+    desiredPosition = target.clone().add(orbitOffset);
+    lookTarget = target.clone().add(up.clone().multiplyScalar(0.3));
+  } else if (cameraMode === 0) {
     const distance = THREE.MathUtils.lerp(8.4, 7.1, speedFactor);
     const height = THREE.MathUtils.lerp(4.25, 5.25, speedFactor);
     const lookAhead = THREE.MathUtils.lerp(10.5, 16.5, speedFactor);
@@ -3734,12 +4019,17 @@ function resetCar() {
   lapStartedAt = performance.now();
 }
 
+function syncPauseButton() {
+  startButton.classList.toggle("is-running", !paused);
+  startButton.classList.toggle("is-paused", paused);
+}
+
 function setPaused(value) {
+  if (raceCountdownActive) return;
   if (paused === value) return;
 
   paused = value;
-  startButton.classList.toggle("is-running", !paused);
-  startButton.classList.toggle("is-paused", paused);
+  syncPauseButton();
 
   window.clearTimeout(readyTimeout);
   message.textContent = paused ? "PAUSED" : "READY";
