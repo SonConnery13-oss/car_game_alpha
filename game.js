@@ -20,6 +20,7 @@ const developersScreen = document.querySelector("#developersScreen");
 const garageScreen = document.querySelector("#garageScreen");
 const rankingsScreen = document.querySelector("#rankingsScreen");
 const gameStartButton = document.querySelector("#gameStartButton");
+const mainLoginButton = document.querySelector("#mainLoginButton");
 const developersButton = document.querySelector("#developersButton");
 const garageButton = document.querySelector("#garageButton");
 const rankingsButton = document.querySelector("#rankingsButton");
@@ -3591,6 +3592,7 @@ function updateAuthUi() {
     authCurrentPlayer.textContent = currentPlayer ? currentPlayer.id : "Not signed in";
   }
   if (authLogoutButton) authLogoutButton.hidden = !currentPlayer;
+  if (mainLoginButton) mainLoginButton.hidden = Boolean(currentPlayer);
   if (authLoginButton) authLoginButton.hidden = Boolean(currentPlayer);
   if (authSignupButton) authSignupButton.hidden = Boolean(currentPlayer);
   if (currentPlayer) {
@@ -3632,6 +3634,7 @@ function setupMenu() {
   message.classList.add("is-visible");
 
   gameStartButton?.addEventListener("click", startGame);
+  mainLoginButton?.addEventListener("click", () => showMenuScreen("login"));
   developersButton?.addEventListener("click", () => showMenuScreen("developers"));
   garageButton?.addEventListener("click", () => showMenuScreen("garage"));
   rankingsButton?.addEventListener("click", () => showMenuScreen("rankings"));
@@ -3677,6 +3680,7 @@ function startGame() {
     showAuthStatus("Sign up or log in first.", true);
     message.textContent = "LOGIN";
     message.classList.add("is-visible");
+    showMenuScreen("login");
     return;
   }
 
