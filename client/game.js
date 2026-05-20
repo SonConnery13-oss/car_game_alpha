@@ -97,9 +97,13 @@ const BRIDGE_ROUTES = [
 const TRACK_SURFACE_OFFSET = 0.065;
 const MAX_FORWARD_SPEED = 200 / 3.6;
 const STEERING_INPUT_RESPONSE = {
-  keyboard: 2.2,
-  analog: 4.8,
-  return: 4.0,
+  keyboard: 1.65,
+  analog: 3.45,
+  return: 4.7,
+};
+const STEERING_INPUT_CURVE = {
+  keyboard: 1,
+  analog: 1.35,
 };
 const VISUAL_SUSPENSION = {
   stiffness: 260,
@@ -3003,6 +3007,7 @@ function updateMiniMap() {
   drawMiniMapTrack(context, 4, "rgba(54, 78, 36, 0.94)");
   drawMiniMapTrack(context, 2.2, "rgba(30, 32, 30, 0.96)");
   drawMiniMapCheckpoints(context);
+  drawMiniMapRemotePlayers(context);
   drawMiniMapCar(context);
 }
 
@@ -3038,15 +3043,37 @@ function drawMiniMapCheckpoints(context) {
 }
 
 function drawMiniMapCar(context) {
-  const mapped = mapToMiniMap(chassisBody.position.x, chassisBody.position.z);
   const tangent = new CANNON.Vec3(0, 0, 1);
   chassisBody.vectorToWorldFrame(tangent, tangent);
   const angle = Math.atan2(tangent.x, tangent.z);
+  drawMiniMapVehicleMarker(context, chassisBody.position.x, chassisBody.position.z, angle, "#69c8ff");
+}
 
+function drawMiniMapRemotePlayers(context) {
+  for (const remote of remotePlayers.values()) {
+    if (remote.courseId && remote.courseId !== selectedCourseId) continue;
+
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(remote.renderQuaternion);
+    const angle = Math.atan2(forward.x, forward.z);
+    drawMiniMapVehicleMarker(
+      context,
+      remote.renderPosition.x,
+      remote.renderPosition.z,
+      angle,
+      "#ffd45a",
+      getMiniMapPlayerLabel(remote.displayName),
+    );
+  }
+}
+
+function drawMiniMapVehicleMarker(context, x, z, angle, color, label = "") {
+  const mapped = mapToMiniMap(x, z);
   context.save();
   context.translate(mapped.x, mapped.y);
   context.rotate(angle);
-  context.fillStyle = "#69c8ff";
+  context.fillStyle = color;
+  context.strokeStyle = "rgba(3, 7, 9, 0.86)";
+  context.lineWidth = 1.4;
   context.beginPath();
   context.moveTo(0, -6);
   context.lineTo(4.8, 5.2);
@@ -3054,7 +3081,28 @@ function drawMiniMapCar(context) {
   context.lineTo(-4.8, 5.2);
   context.closePath();
   context.fill();
+  context.stroke();
   context.restore();
+
+  if (!label) return;
+
+  context.save();
+  context.font = "800 9px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  const labelWidth = Math.min(54, context.measureText(label).width + 10);
+  const labelX = THREE.MathUtils.clamp(mapped.x, labelWidth / 2 + 2, miniMapState.width - labelWidth / 2 - 2);
+  const labelY = THREE.MathUtils.clamp(mapped.y - 12, 8, miniMapState.height - 8);
+  context.fillStyle = "rgba(3, 7, 9, 0.72)";
+  context.fillRect(labelX - labelWidth / 2, labelY - 6, labelWidth, 12);
+  context.fillStyle = "#ffd45a";
+  context.fillText(label, labelX, labelY + 0.5);
+  context.restore();
+}
+
+function getMiniMapPlayerLabel(displayName) {
+  const label = String(displayName || "Guest").trim();
+  return label.length > 8 ? `${label.slice(0, 7)}.` : label;
 }
 
 function mapToMiniMap(x, z) {
@@ -3759,14 +3807,17 @@ function createOrUpdateRemotePlayer(player = {}) {
       lastUpdateAt: performance.now(),
       velocity: new THREE.Vector3(),
       steering: 0,
+      nameLabel: null,
     };
     remotePlayers.set(player.id, remote);
   }
 
   remote.displayName = player.displayName ?? "Guest";
   remote.courseId = player.courseId ?? selectedCourseId;
+  updateRemoteNameLabel(remote, remote.displayName);
   if (player.state) applyRemoteState(remote, player.state, true);
   updateMultiplayerRoomStatus();
+  updateMiniMap();
 }
 
 function handleRemotePlayerState(payload = {}) {
@@ -3840,6 +3891,71 @@ function updateRemotePlayers() {
   }
 }
 
+function updateRemoteNameLabel(remote, displayName) {
+  const safeName = String(displayName || "Guest").trim().slice(0, 24) || "Guest";
+  if (remote.nameLabel?.userData?.labelText === safeName) return;
+
+  if (remote.nameLabel) {
+    remote.mesh.remove(remote.nameLabel);
+    disposeObject3D(remote.nameLabel);
+  }
+
+  remote.nameLabel = createRemoteNameLabel(safeName);
+  remote.mesh.add(remote.nameLabel);
+}
+
+function createRemoteNameLabel(displayName) {
+  const texture = makeCanvasTexture(320, 88, (context, width, height) => {
+    const name = String(displayName || "Guest").trim().slice(0, 24) || "Guest";
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = "rgba(3, 7, 9, 0.78)";
+    drawRoundedCanvasRect(context, 12, 16, width - 24, 52, 18);
+    context.fill();
+    context.strokeStyle = "rgba(255, 212, 90, 0.78)";
+    context.lineWidth = 3;
+    context.stroke();
+
+    let fontSize = 30;
+    do {
+      context.font = `900 ${fontSize}px Inter, system-ui, sans-serif`;
+      fontSize -= 1;
+    } while (fontSize > 18 && context.measureText(name).width > width - 54);
+
+    context.fillStyle = "#ffffff";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(name, width / 2, 43);
+  });
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.name = "remotePlayerNameLabel";
+  sprite.position.set(0, 2.45, 0);
+  sprite.scale.set(3.4, 0.94, 1);
+  sprite.renderOrder = 40;
+  sprite.userData.labelText = displayName;
+  return sprite;
+}
+
+function drawRoundedCanvasRect(context, x, y, width, height, radius) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+  context.closePath();
+}
+
 function removeRemotePlayer(id) {
   const remote = remotePlayers.get(id);
   if (!remote) return;
@@ -3848,6 +3964,7 @@ function removeRemotePlayer(id) {
   disposeObject3D(remote.mesh);
   remotePlayers.delete(id);
   updateMultiplayerRoomStatus();
+  updateMiniMap();
 }
 
 function clearRemotePlayers() {
@@ -4196,7 +4313,7 @@ function updateSelectedCourseUi() {
   if (!selected) return;
 
   if (selectedCourseName) {
-    selectedCourseName.textContent = `${selected.name} / ${selected.distanceLabel}`;
+    selectedCourseName.textContent = `${selected.menuLabel ?? selected.name} / ${selected.distanceLabel}`;
   }
   if (lapLabel) lapLabel.textContent = selected.loop ? "LAP" : "RUN";
 
@@ -4507,7 +4624,7 @@ function readDrivingInput(delta = FIXED_TIME_STEP) {
     -1,
     1,
   );
-  const steerInput = smoothSteerInput(rawSteerInput, delta, steerSource);
+  const steerInput = smoothSteerInput(applySteeringInputCurve(rawSteerInput, steerSource), delta, steerSource);
 
   return {
     steer: steerInput,
@@ -4515,6 +4632,14 @@ function readDrivingInput(delta = FIXED_TIME_STEP) {
     brake: brakePedal,
     handbrake,
   };
+}
+
+function applySteeringInputCurve(value, source) {
+  const magnitude = Math.abs(value);
+  if (magnitude <= 0.001) return 0;
+
+  const curve = STEERING_INPUT_CURVE[source] ?? STEERING_INPUT_CURVE.keyboard;
+  return Math.sign(value) * Math.pow(magnitude, curve);
 }
 
 function smoothSteerInput(rawSteerInput, delta, source) {
@@ -5404,7 +5529,6 @@ function updateHud() {
   currentLapValue.textContent = formatTime(elapsed);
   bestLapValue.textContent = bestLap === null ? "--.---" : formatTime(bestLap);
   gearValue.textContent = estimateGear(kmh);
-  updateMiniMap();
   updatePhysicsDebug(kmh);
 }
 
@@ -5632,6 +5756,7 @@ function animate() {
 
     updateVehicleMeshes(delta);
     updateRemotePlayers();
+    updateMiniMap();
     updateCamera(delta);
     if (skyDome) skyDome.position.copy(camera.position);
     const displayKmh = Math.round(chassisBody.velocity.length() * 3.6);

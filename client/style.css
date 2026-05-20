@@ -388,16 +388,41 @@ button {
   overflow: hidden;
 }
 
-.selected-car-panel span {
+.selected-car-meta {
+  display: grid;
+  gap: 10px;
+}
+
+.selected-car-name {
   color: #ffffff;
   font-size: 1.05rem;
   font-weight: 900;
   letter-spacing: 0;
 }
 
-.selected-car-panel span + span {
+.selected-course-card {
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid rgba(167, 255, 91, 0.32);
+  border-radius: 8px;
+  background: rgba(167, 255, 91, 0.08);
+}
+
+.selected-course-card span {
+  color: rgba(245, 247, 248, 0.66);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.selected-course-card strong {
   color: rgba(245, 247, 248, 0.72);
-  font-size: 0.84rem;
+  font-size: 0.88rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .screen-card,
@@ -836,6 +861,10 @@ button {
   box-shadow: 0 18px 38px rgba(0, 0, 0, 0.2);
   pointer-events: none;
   backdrop-filter: blur(12px);
+}
+
+.menu-shell:not(.is-hidden) ~ .mini-map {
+  z-index: 14;
 }
 
 .mini-map canvas {

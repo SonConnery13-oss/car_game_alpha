@@ -48,9 +48,12 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     accelerationResponse: 16,
     longitudinalForceResponse: 28,
     slipRatioDeadband: 0.018,
-    maxSteerAngle: 0.58,
-    steeringResponse: 3.1,
-    steeringReturnResponse: 4.2,
+    maxSteerAngle: 0.52,
+    steeringResponse: 2.55,
+    steeringReturnResponse: 4.55,
+    steerFadeStart: 5.5,
+    steerFadeEnd: 34,
+    minSteerScale: 0.36,
     rollingResistance: 0.016,
     airDrag: 0.46,
     downforce: 3.05,
@@ -112,9 +115,12 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     accelerationResponse: 15,
     longitudinalForceResponse: 26,
     slipRatioDeadband: 0.02,
-    maxSteerAngle: 0.55,
-    steeringResponse: 3.0,
-    steeringReturnResponse: 4.0,
+    maxSteerAngle: 0.5,
+    steeringResponse: 2.45,
+    steeringReturnResponse: 4.45,
+    steerFadeStart: 5.5,
+    steerFadeEnd: 34,
+    minSteerScale: 0.36,
     rollingResistance: 0.018,
     airDrag: 0.52,
     downforce: 2.65,
@@ -379,8 +385,11 @@ export class VehiclePhysics {
   }
 
   updateSteering(dt) {
-    const speedFactor = smoothstep(10, this.config.maxForwardSpeed, Math.abs(this.signedSpeed));
-    const steerLimit = lerp(this.config.maxSteerAngle, this.config.maxSteerAngle * 0.38, speedFactor);
+    const steerFadeStart = this.config.steerFadeStart ?? 10;
+    const steerFadeEnd = this.config.steerFadeEnd ?? this.config.maxForwardSpeed;
+    const minSteerScale = this.config.minSteerScale ?? 0.38;
+    const speedFactor = smoothstep(steerFadeStart, steerFadeEnd, Math.abs(this.signedSpeed));
+    const steerLimit = lerp(this.config.maxSteerAngle, this.config.maxSteerAngle * minSteerScale, speedFactor);
     const targetSteer = this.input.steer * steerLimit;
     const response =
       Math.abs(targetSteer) < Math.abs(this.steeringAngle)
