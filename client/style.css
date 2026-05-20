@@ -207,7 +207,8 @@ button {
   font-weight: 800;
 }
 
-.auth-panel {
+.auth-panel,
+.multiplayer-panel {
   display: grid;
   gap: 10px;
   margin-top: 18px;
@@ -215,6 +216,10 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.055);
+}
+
+.multiplayer-panel {
+  margin-top: 10px;
 }
 
 .auth-heading {
@@ -264,6 +269,34 @@ button {
   font: inherit;
   font-weight: 800;
   outline: none;
+}
+
+.room-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(108px, auto);
+  gap: 8px;
+}
+
+.room-controls input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(4, 8, 10, 0.72);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 800;
+  outline: none;
+}
+
+.room-controls input:focus {
+  border-color: rgba(167, 255, 91, 0.78);
+}
+
+.room-controls .menu-button {
+  min-height: 40px;
+  font-size: 0.82rem;
 }
 
 .auth-fields input:focus {
@@ -1059,6 +1092,7 @@ button {
 
   .auth-fields,
   .auth-actions,
+  .room-controls,
   .results-actions {
     grid-template-columns: minmax(0, 1fr);
   }

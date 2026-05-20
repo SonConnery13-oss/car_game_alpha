@@ -39,6 +39,9 @@ const menuReturnButton = document.querySelector("#menuReturnButton");
 const controlsHint = document.querySelector("#controlsHint");
 const physicsDebug = document.querySelector("#physicsDebug");
 const miniMapCanvas = document.querySelector("#miniMapCanvas");
+const roomIdInput = document.querySelector("#roomIdInput");
+const joinRoomButton = document.querySelector("#joinRoomButton");
+const multiplayerStatus = document.querySelector("#multiplayerStatus");
 const loginScreen = document.querySelector("#loginScreen");
 const signupScreen = document.querySelector("#signupScreen");
 const loginForm = document.querySelector("#loginForm");
@@ -68,6 +71,7 @@ const STORAGE_KEYS = {
   accounts: "racing.accounts.v1",
   session: "racing.session.v1",
   leaderboard: "racing.leaderboard.v1",
+  room: "racing.room.v1",
 };
 const DEFAULT_ROAD_WIDTH = 14;
 const FIXED_TIME_STEP = 1 / 120;
@@ -255,6 +259,8 @@ const driftSmokeParticles = [];
 const wallSparkParticles = [];
 const WALL_SPARK_GEOMETRY = new THREE.SphereGeometry(0.035, 6, 4);
 const WALL_SPARK_COLORS = [0xfff1a6, 0xffc247, 0xff742f];
+const MULTIPLAYER_SEND_INTERVAL = 1000 / 20;
+const REMOTE_INTERPOLATION_MS = 140;
 let lastWallSparkAt = 0;
 const vehicleDynamics = {
   braking: false,
@@ -328,6 +334,15 @@ const wheelMeshMotion = Array.from({ length: 4 }, () => ({
   localPosition: new THREE.Vector3(),
   localQuaternion: new THREE.Quaternion(),
 }));
+const remotePlayers = new Map();
+const multiplayer = {
+  socket: null,
+  selfId: null,
+  roomId: "lobby",
+  connected: false,
+  joined: false,
+  lastSentAt: 0,
+};
 const tunedDamperState = {
   heave: 0,
   pitch: 0,
@@ -359,6 +374,7 @@ resetCar();
 bindInput();
 initializeAuth();
 setupMenu();
+initializeMultiplayer();
 setupDebugTools();
 animate();
 
@@ -3567,6 +3583,7 @@ function logoutPlayer() {
   currentPlayer = null;
   localStorage.removeItem(STORAGE_KEYS.session);
   updateAuthUi();
+  sendMultiplayerProfile();
   showAuthStatus("Logged out.");
   showMainMenu();
 }
@@ -3575,6 +3592,7 @@ function setCurrentPlayer(key, id) {
   currentPlayer = { key, id };
   saveStoredJson(STORAGE_KEYS.session, { key });
   updateAuthUi();
+  sendMultiplayerProfile();
 }
 
 function getEnteredCredentials(mode) {
@@ -3636,6 +3654,289 @@ function saveStoredJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function initializeMultiplayer() {
+  const initialRoomId = sanitizeRoomId(URL_PARAMS.get("room") ?? localStorage.getItem(STORAGE_KEYS.room) ?? "lobby");
+  multiplayer.roomId = initialRoomId;
+  if (roomIdInput) roomIdInput.value = initialRoomId;
+
+  if (typeof window.io !== "function") {
+    setMultiplayerStatus("Offline");
+    return;
+  }
+
+  multiplayer.socket = window.io();
+  setMultiplayerStatus("Connecting");
+
+  multiplayer.socket.on("connect", () => {
+    multiplayer.connected = true;
+    multiplayer.selfId = multiplayer.socket.id;
+    joinMultiplayerRoom(getEnteredRoomId(), true);
+  });
+
+  multiplayer.socket.on("disconnect", () => {
+    multiplayer.connected = false;
+    multiplayer.joined = false;
+    clearRemotePlayers();
+    setMultiplayerStatus("Offline");
+  });
+
+  multiplayer.socket.on("multiplayer:joined", handleMultiplayerJoined);
+  multiplayer.socket.on("multiplayer:playerJoined", createOrUpdateRemotePlayer);
+  multiplayer.socket.on("multiplayer:playerUpdated", createOrUpdateRemotePlayer);
+  multiplayer.socket.on("multiplayer:state", handleRemotePlayerState);
+  multiplayer.socket.on("multiplayer:playerLeft", ({ id }) => removeRemotePlayer(id));
+}
+
+function joinMultiplayerRoom(roomId = "lobby", isReconnect = false) {
+  const safeRoomId = sanitizeRoomId(roomId);
+  multiplayer.roomId = safeRoomId;
+  localStorage.setItem(STORAGE_KEYS.room, safeRoomId);
+  syncRoomUrl(safeRoomId);
+  if (roomIdInput) roomIdInput.value = safeRoomId;
+
+  if (!multiplayer.socket?.connected) {
+    setMultiplayerStatus("Offline");
+    return;
+  }
+
+  if (!isReconnect) clearRemotePlayers();
+  multiplayer.joined = false;
+  setMultiplayerStatus("Joining");
+  multiplayer.socket.emit("multiplayer:join", {
+    roomId: safeRoomId,
+    player: getMultiplayerProfile(),
+    state: getMultiplayerState(),
+  });
+}
+
+function handleMultiplayerJoined(payload = {}) {
+  multiplayer.selfId = payload.selfId ?? multiplayer.socket?.id ?? null;
+  multiplayer.roomId = sanitizeRoomId(payload.roomId ?? multiplayer.roomId);
+  multiplayer.joined = true;
+  clearRemotePlayers();
+
+  for (const player of payload.players ?? []) {
+    createOrUpdateRemotePlayer(player);
+  }
+
+  updateMultiplayerRoomStatus(payload.players?.length ?? remotePlayers.size + 1);
+  sendMultiplayerState(true);
+}
+
+function createOrUpdateRemotePlayer(player = {}) {
+  if (!player.id || player.id === multiplayer.selfId) return;
+
+  if (player.courseId && player.courseId !== selectedCourseId) {
+    removeRemotePlayer(player.id);
+    return;
+  }
+
+  const existing = remotePlayers.get(player.id);
+  if (existing && existing.carId !== player.carId) {
+    removeRemotePlayer(player.id);
+  }
+
+  let remote = remotePlayers.get(player.id);
+  if (!remote) {
+    const mesh = createCarMesh(CAR_MODELS[player.carId] ? player.carId : "gt3");
+    mesh.userData.remotePlayerId = player.id;
+    scene.add(mesh);
+
+    remote = {
+      id: player.id,
+      carId: CAR_MODELS[player.carId] ? player.carId : "gt3",
+      courseId: player.courseId ?? selectedCourseId,
+      mesh,
+      fromPosition: new THREE.Vector3(),
+      targetPosition: new THREE.Vector3(),
+      renderPosition: new THREE.Vector3(),
+      fromQuaternion: new THREE.Quaternion(),
+      targetQuaternion: new THREE.Quaternion(),
+      renderQuaternion: new THREE.Quaternion(),
+      interpolationStart: performance.now(),
+      interpolationDuration: REMOTE_INTERPOLATION_MS,
+      lastUpdateAt: performance.now(),
+      velocity: new THREE.Vector3(),
+      steering: 0,
+    };
+    remotePlayers.set(player.id, remote);
+  }
+
+  remote.displayName = player.displayName ?? "Guest";
+  remote.courseId = player.courseId ?? selectedCourseId;
+  if (player.state) applyRemoteState(remote, player.state, true);
+  updateMultiplayerRoomStatus();
+}
+
+function handleRemotePlayerState(payload = {}) {
+  if (!payload.id || payload.id === multiplayer.selfId) return;
+
+  let remote = remotePlayers.get(payload.id);
+  if (!remote) {
+    createOrUpdateRemotePlayer({
+      id: payload.id,
+      carId: "gt3",
+      courseId: selectedCourseId,
+      state: payload.state,
+    });
+    remote = remotePlayers.get(payload.id);
+  }
+
+  if (remote) applyRemoteState(remote, payload.state);
+}
+
+function applyRemoteState(remote, state = {}, immediate = false) {
+  const position = new THREE.Vector3(state.position?.x ?? 0, state.position?.y ?? 0, state.position?.z ?? 0);
+  const quaternion = new THREE.Quaternion(
+    state.quaternion?.x ?? 0,
+    state.quaternion?.y ?? 0,
+    state.quaternion?.z ?? 0,
+    state.quaternion?.w ?? 1,
+  ).normalize();
+
+  if (immediate) {
+    remote.renderPosition.copy(position);
+    remote.fromPosition.copy(position);
+    remote.targetPosition.copy(position);
+    remote.renderQuaternion.copy(quaternion);
+    remote.fromQuaternion.copy(quaternion);
+    remote.targetQuaternion.copy(quaternion);
+    remote.mesh.position.copy(position);
+    remote.mesh.quaternion.copy(quaternion);
+  } else {
+    remote.fromPosition.copy(remote.renderPosition);
+    remote.fromQuaternion.copy(remote.renderQuaternion);
+    remote.targetPosition.copy(position);
+    remote.targetQuaternion.copy(quaternion);
+  }
+
+  remote.velocity.set(state.velocity?.x ?? 0, state.velocity?.y ?? 0, state.velocity?.z ?? 0);
+  remote.steering = state.steering ?? 0;
+  remote.interpolationStart = performance.now();
+  remote.interpolationDuration = REMOTE_INTERPOLATION_MS;
+  remote.lastUpdateAt = performance.now();
+}
+
+function updateRemotePlayers() {
+  const now = performance.now();
+
+  for (const remote of remotePlayers.values()) {
+    const alpha = THREE.MathUtils.clamp(
+      (now - remote.interpolationStart) / Math.max(remote.interpolationDuration, 1),
+      0,
+      1,
+    );
+    const smoothAlpha = alpha * alpha * (3 - 2 * alpha);
+    remote.renderPosition.lerpVectors(remote.fromPosition, remote.targetPosition, smoothAlpha);
+    remote.renderQuaternion.copy(remote.fromQuaternion).slerp(remote.targetQuaternion, smoothAlpha);
+    remote.mesh.position.copy(remote.renderPosition);
+    remote.mesh.quaternion.copy(remote.renderQuaternion);
+
+    const visualRoot = remote.mesh.getObjectByName("carVisualRoot");
+    if (visualRoot) {
+      visualRoot.rotation.z = THREE.MathUtils.clamp(-remote.steering * 0.1, -0.06, 0.06);
+    }
+  }
+}
+
+function removeRemotePlayer(id) {
+  const remote = remotePlayers.get(id);
+  if (!remote) return;
+
+  scene.remove(remote.mesh);
+  disposeObject3D(remote.mesh);
+  remotePlayers.delete(id);
+  updateMultiplayerRoomStatus();
+}
+
+function clearRemotePlayers() {
+  for (const id of [...remotePlayers.keys()]) {
+    removeRemotePlayer(id);
+  }
+}
+
+function sendMultiplayerProfile() {
+  if (!multiplayer.socket?.connected || !multiplayer.joined) return;
+
+  multiplayer.socket.emit("multiplayer:updateProfile", {
+    player: getMultiplayerProfile(),
+  });
+}
+
+function sendMultiplayerState(force = false) {
+  if (!multiplayer.socket?.connected || !multiplayer.joined) return;
+
+  const now = performance.now();
+  if (!force && now - multiplayer.lastSentAt < MULTIPLAYER_SEND_INTERVAL) return;
+
+  multiplayer.lastSentAt = now;
+  multiplayer.socket.emit("multiplayer:state", getMultiplayerState());
+}
+
+function getMultiplayerState() {
+  return {
+    position: {
+      x: chassisBody.position.x,
+      y: chassisBody.position.y,
+      z: chassisBody.position.z,
+    },
+    quaternion: {
+      x: chassisBody.quaternion.x,
+      y: chassisBody.quaternion.y,
+      z: chassisBody.quaternion.z,
+      w: chassisBody.quaternion.w,
+    },
+    velocity: {
+      x: chassisBody.velocity.x,
+      y: chassisBody.velocity.y,
+      z: chassisBody.velocity.z,
+    },
+    steering: vehiclePhysics?.steeringAngle ?? steering,
+    throttle: vehiclePhysics?.throttle ?? 0,
+    brake: vehiclePhysics?.brake ?? 0,
+    speed: chassisBody.velocity.length(),
+    timestamp: Date.now(),
+  };
+}
+
+function getMultiplayerProfile() {
+  const fallbackId = multiplayer.selfId ? `guest-${multiplayer.selfId.slice(0, 5)}` : "guest";
+  return {
+    playerId: currentPlayer?.key ?? fallbackId,
+    displayName: currentPlayer?.id ?? fallbackId,
+    carId: selectedCarId,
+    courseId: selectedCourseId,
+  };
+}
+
+function getEnteredRoomId() {
+  return sanitizeRoomId(roomIdInput?.value ?? multiplayer.roomId);
+}
+
+function sanitizeRoomId(value) {
+  const roomId = String(value || "lobby").trim().slice(0, 32);
+  return /^[A-Za-z0-9_-]+$/.test(roomId) ? roomId : "lobby";
+}
+
+function syncRoomUrl(roomId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("room", roomId);
+  window.history.replaceState(null, "", url.toString());
+}
+
+function setMultiplayerStatus(text) {
+  if (multiplayerStatus) multiplayerStatus.textContent = text;
+}
+
+function updateMultiplayerRoomStatus(totalPlayers = remotePlayers.size + (multiplayer.joined ? 1 : 0)) {
+  if (!multiplayer.joined) {
+    setMultiplayerStatus(multiplayer.connected ? "Connected" : "Offline");
+    return;
+  }
+
+  setMultiplayerStatus(`${multiplayer.roomId} / ${totalPlayers}`);
+}
+
 function setupMenu() {
   updateSelectedCarUi();
   updateSelectedCourseUi();
@@ -3651,6 +3952,7 @@ function setupMenu() {
   developersButton?.addEventListener("click", () => showMenuScreen("developers"));
   garageButton?.addEventListener("click", () => showMenuScreen("garage"));
   rankingsButton?.addEventListener("click", () => showMenuScreen("rankings"));
+  joinRoomButton?.addEventListener("click", () => joinMultiplayerRoom(getEnteredRoomId()));
   authLoginButton?.addEventListener("click", () => showMenuScreen("login"));
   authSignupButton?.addEventListener("click", () => showMenuScreen("signup"));
   loginToSignupButton?.addEventListener("click", () => showMenuScreen("signup"));
@@ -3847,6 +4149,7 @@ function selectCar(carId) {
   applyVehicleTuning();
   updateWheelStyle();
   updateSelectedCarUi();
+  sendMultiplayerProfile();
 }
 
 function selectCourse(courseId) {
@@ -3855,6 +4158,7 @@ function selectCourse(courseId) {
   const url = new URL(window.location.href);
   url.searchParams.set("track", courseId);
   url.searchParams.set("car", selectedCarId);
+  url.searchParams.set("room", multiplayer.roomId);
   window.location.href = url.toString();
 }
 
@@ -5249,6 +5553,7 @@ function resetCar() {
   tunedDamperState.roll = 0;
   lapStartedAt = performance.now();
   updateMiniMap();
+  sendMultiplayerState(true);
 }
 
 function syncPauseButton() {
@@ -5318,11 +5623,14 @@ function animate() {
 
       updateLap();
       updateHud();
+      sendMultiplayerState();
     } else {
       physicsAccumulator = 0;
+      sendMultiplayerState();
     }
 
     updateVehicleMeshes(delta);
+    updateRemotePlayers();
     updateCamera(delta);
     if (skyDome) skyDome.position.copy(camera.position);
     const displayKmh = Math.round(chassisBody.velocity.length() * 3.6);

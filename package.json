@@ -1,0 +1,16 @@
+{
+  "name": "car-game-alpha-multiplayer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Three.js racing game with Socket.IO multiplayer rooms.",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "check": "node --check client/game.js && node --check client/physics/vehiclePhysics.js && node --check server/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

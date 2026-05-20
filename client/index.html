@@ -59,6 +59,16 @@
             </div>
             <p id="authStatus" class="auth-status" data-auth-status aria-live="polite"></p>
           </div>
+          <div id="multiplayerPanel" class="multiplayer-panel" aria-label="Multiplayer room">
+            <div class="auth-heading">
+              <span>Room</span>
+              <strong id="multiplayerStatus">Offline</strong>
+            </div>
+            <div class="room-controls">
+              <input id="roomIdInput" type="text" maxlength="32" autocomplete="off" value="lobby" placeholder="Room ID" />
+              <button class="menu-button is-primary" id="joinRoomButton" type="button">Join Room</button>
+            </div>
+          </div>
         </div>
 
         <aside class="selected-car-panel" aria-label="Selected car">
@@ -249,6 +259,7 @@
       <div id="message" class="message is-visible">READY</div>
     </main>
 
+    <script src="/socket.io/socket.io.js"></script>
     <script type="module" src="./game.js"></script>
   </body>
 </html>
