@@ -27,6 +27,7 @@
             <button class="menu-button is-primary" id="gameStartButton" type="button">Game Start!</button>
             <button class="menu-button" id="developersButton" type="button">Game Developers</button>
             <button class="menu-button" id="garageButton" type="button">Garage</button>
+            <button class="menu-button" id="rankingsButton" type="button">Rankings</button>
           </div>
           <div class="course-picker" aria-label="Course selector">
             <span>Course</span>
@@ -130,6 +131,42 @@
               <strong>AMG GT Track</strong>
             </button>
           </div>
+        </div>
+      </section>
+
+      <section id="rankingsScreen" class="menu-screen" aria-label="Course rankings" hidden>
+        <div class="rankings-card">
+          <div class="rankings-header">
+            <div>
+              <p class="menu-kicker">COURSE RANKINGS</p>
+              <h2>Rankings</h2>
+            </div>
+            <button class="menu-button" data-menu-back type="button">Back</button>
+          </div>
+
+          <div id="rankingsCourseTabs" class="rankings-tabs" aria-label="Ranking course selector">
+            <button class="rankings-tab is-selected" type="button" data-rankings-course-id="map1">Akina Ridge</button>
+            <button class="rankings-tab" type="button" data-rankings-course-id="map2">Iroha Switchbacks</button>
+            <button class="rankings-tab" type="button" data-rankings-course-id="map3">Happo Forest</button>
+          </div>
+
+          <div class="rankings-title">
+            <span>Course</span>
+            <strong id="rankingsCourseName">Map 1 / 7.552 km</strong>
+          </div>
+
+          <div class="leaderboard rankings-board" aria-label="Selected course leaderboard">
+            <div class="leaderboard-head rankings-row">
+              <span>Rank</span>
+              <span>ID</span>
+              <span>Car</span>
+              <span>Best</span>
+              <span>Gap</span>
+            </div>
+            <div id="rankingsBody" class="leaderboard-body"></div>
+          </div>
+
+          <div id="rankingsCarMix" class="rankings-car-mix" aria-label="Cars used on selected course"></div>
         </div>
       </section>
 

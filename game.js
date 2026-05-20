@@ -18,14 +18,20 @@ const message = document.querySelector("#message");
 const mainMenu = document.querySelector("#mainMenu");
 const developersScreen = document.querySelector("#developersScreen");
 const garageScreen = document.querySelector("#garageScreen");
+const rankingsScreen = document.querySelector("#rankingsScreen");
 const gameStartButton = document.querySelector("#gameStartButton");
 const developersButton = document.querySelector("#developersButton");
 const garageButton = document.querySelector("#garageButton");
+const rankingsButton = document.querySelector("#rankingsButton");
 const selectedCarName = document.querySelector("#selectedCarName");
 const selectedCarImage = document.querySelector("#selectedCarImage");
 const garageOptions = document.querySelectorAll("[data-car-id]");
 const courseOptions = document.querySelectorAll("[data-course-id]");
+const rankingsCourseOptions = document.querySelectorAll("[data-rankings-course-id]");
 const selectedCourseName = document.querySelector("#selectedCourseName");
+const rankingsCourseName = document.querySelector("#rankingsCourseName");
+const rankingsBody = document.querySelector("#rankingsBody");
+const rankingsCarMix = document.querySelector("#rankingsCarMix");
 const lapLabel = document.querySelector("#lapLabel");
 const menuBackButtons = document.querySelectorAll("[data-menu-back]");
 const menuReturnButton = document.querySelector("#menuReturnButton");
@@ -146,6 +152,7 @@ const CAR_MODELS = {
 
 const initialCourseId = URL_PARAMS.get("track") ?? URL_PARAMS.get("course");
 let selectedCourseId = COURSE_DEFS[initialCourseId] ? initialCourseId : DEFAULT_COURSE_ID;
+let rankingsCourseId = selectedCourseId;
 let activeCourse = COURSE_DEFS[selectedCourseId];
 const ROAD_WIDTH = activeCourse.roadWidth ?? DEFAULT_ROAD_WIDTH;
 const trackPoints = createTrackPoints(activeCourse);
@@ -3617,6 +3624,7 @@ function saveStoredJson(key, value) {
 function setupMenu() {
   updateSelectedCarUi();
   updateSelectedCourseUi();
+  renderRankingsScreen();
   updateAuthUi();
   syncPauseButton();
   if (menuReturnButton) menuReturnButton.hidden = true;
@@ -3626,6 +3634,7 @@ function setupMenu() {
   gameStartButton?.addEventListener("click", startGame);
   developersButton?.addEventListener("click", () => showMenuScreen("developers"));
   garageButton?.addEventListener("click", () => showMenuScreen("garage"));
+  rankingsButton?.addEventListener("click", () => showMenuScreen("rankings"));
   authLoginButton?.addEventListener("click", () => showMenuScreen("login"));
   authSignupButton?.addEventListener("click", () => showMenuScreen("signup"));
   loginToSignupButton?.addEventListener("click", () => showMenuScreen("signup"));
@@ -3654,6 +3663,10 @@ function setupMenu() {
     option.addEventListener("click", () => selectCourse(option.dataset.courseId));
   }
 
+  for (const option of rankingsCourseOptions) {
+    option.addEventListener("click", () => selectRankingsCourse(option.dataset.rankingsCourseId));
+  }
+
   if (URL_PARAMS.get("autostart") === "1" || window.location.hash.includes("autostart")) {
     window.setTimeout(startGame, 0);
   }
@@ -3675,6 +3688,7 @@ function startGame() {
   mainMenu?.classList.add("is-hidden");
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
+  if (rankingsScreen) rankingsScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
   if (signupScreen) signupScreen.hidden = true;
   if (menuReturnButton) menuReturnButton.hidden = false;
@@ -3688,8 +3702,10 @@ function showMenuScreen(screen) {
   if (mainMenu) mainMenu.classList.add("is-hidden");
   if (developersScreen) developersScreen.hidden = screen !== "developers";
   if (garageScreen) garageScreen.hidden = screen !== "garage";
+  if (rankingsScreen) rankingsScreen.hidden = screen !== "rankings";
   if (loginScreen) loginScreen.hidden = screen !== "login";
   if (signupScreen) signupScreen.hidden = screen !== "signup";
+  if (screen === "rankings") renderRankingsScreen();
   focusAuthScreen(screen);
 }
 
@@ -3697,6 +3713,7 @@ function showMainMenu() {
   blurActiveUiControl();
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
+  if (rankingsScreen) rankingsScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
   if (signupScreen) signupScreen.hidden = true;
   mainMenu?.classList.remove("is-hidden");
@@ -3716,10 +3733,12 @@ function returnToMenu() {
   mainMenu?.classList.remove("is-hidden");
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
+  if (rankingsScreen) rankingsScreen.hidden = true;
   if (menuReturnButton) menuReturnButton.hidden = true;
   window.clearTimeout(readyTimeout);
   message.textContent = "READY";
   message.classList.add("is-visible");
+  if (rankingsScreen) rankingsScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
   if (signupScreen) signupScreen.hidden = true;
 }
@@ -3739,6 +3758,7 @@ function retryRace() {
   mainMenu?.classList.add("is-hidden");
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
+  if (rankingsScreen) rankingsScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
   if (signupScreen) signupScreen.hidden = true;
   if (menuReturnButton) menuReturnButton.hidden = false;
@@ -3869,6 +3889,90 @@ function updateSelectedCourseUi() {
       if (distance) distance.textContent = course.distanceLabel;
     }
   }
+}
+
+function selectRankingsCourse(courseId) {
+  if (!COURSE_DEFS[courseId]) return;
+
+  rankingsCourseId = courseId;
+  renderRankingsScreen();
+}
+
+function renderRankingsScreen() {
+  if (!rankingsBody || !rankingsCarMix) return;
+
+  const course = COURSE_DEFS[rankingsCourseId] ?? COURSE_DEFS[DEFAULT_COURSE_ID];
+  rankingsCourseId = course.id;
+
+  if (rankingsCourseName) {
+    rankingsCourseName.textContent = `${course.name} / ${course.distanceLabel}`;
+  }
+
+  for (const option of rankingsCourseOptions) {
+    const optionCourse = COURSE_DEFS[option.dataset.rankingsCourseId];
+    option.classList.toggle("is-selected", option.dataset.rankingsCourseId === rankingsCourseId);
+    if (optionCourse) option.textContent = optionCourse.menuLabel ?? optionCourse.name;
+  }
+
+  const records = getCourseLeaderboard(rankingsCourseId);
+  rankingsBody.replaceChildren();
+  rankingsCarMix.replaceChildren();
+
+  if (!records.length) {
+    const empty = document.createElement("div");
+    empty.className = "leaderboard-empty";
+    empty.textContent = "No records yet.";
+    rankingsBody.append(empty);
+
+    const carEmpty = document.createElement("div");
+    carEmpty.className = "rankings-car-item";
+    carEmpty.append(createTextElement("strong", "No cars recorded"), createTextElement("small", "Finish this course to add data."));
+    rankingsCarMix.append(carEmpty);
+    return;
+  }
+
+  const leaderTime = records[0].time;
+  records.forEach((record, index) => {
+    const row = document.createElement("div");
+    row.className = "leaderboard-row rankings-row";
+    row.classList.toggle("is-player", record.key === currentPlayer?.key);
+
+    const gap = record.time - leaderTime;
+    row.append(
+      createTextElement("span", `#${index + 1}`),
+      createTextElement("span", record.id ?? "PLAYER"),
+      createTextElement("span", getCarName(record.carId)),
+      createTextElement("span", formatTime(record.time)),
+      createTextElement("span", gap <= 0 ? "--" : `+${formatTime(gap)}`),
+    );
+    rankingsBody.append(row);
+  });
+
+  const carCounts = new Map();
+  for (const record of records) {
+    const carId = record.carId ?? "unknown";
+    carCounts.set(carId, (carCounts.get(carId) ?? 0) + 1);
+  }
+
+  for (const [carId, count] of [...carCounts.entries()].sort((a, b) => b[1] - a[1] || getCarName(a[0]).localeCompare(getCarName(b[0])))) {
+    const item = document.createElement("div");
+    item.className = "rankings-car-item";
+    item.append(
+      createTextElement("strong", getCarName(carId)),
+      createTextElement("small", `${count} ${count === 1 ? "record" : "records"}`),
+    );
+    rankingsCarMix.append(item);
+  }
+}
+
+function createTextElement(tagName, text) {
+  const element = document.createElement(tagName);
+  element.textContent = text;
+  return element;
+}
+
+function getCarName(carId) {
+  return CAR_MODELS[carId]?.name ?? "Unknown Car";
 }
 
 function updateWheelStyle() {
@@ -4803,9 +4907,9 @@ function saveLeaderboardRecord(finishTime) {
   };
 }
 
-function getCourseLeaderboard() {
+function getCourseLeaderboard(courseId = selectedCourseId) {
   const leaderboard = loadStoredJson(STORAGE_KEYS.leaderboard, {});
-  const courseRecords = leaderboard[selectedCourseId] ?? {};
+  const courseRecords = leaderboard[courseId] ?? {};
   return Object.values(courseRecords)
     .filter((record) => Number.isFinite(record.time))
     .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
