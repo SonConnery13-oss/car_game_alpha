@@ -62,10 +62,15 @@ button {
   grid-template-columns: minmax(280px, 760px);
 }
 
+.auth-screen {
+  grid-template-columns: minmax(280px, 480px);
+}
+
 .menu-panel,
 .selected-car-panel,
 .screen-card,
-.garage-card {
+.garage-card,
+.auth-card {
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
   background: rgba(8, 12, 14, 0.72);
@@ -101,10 +106,176 @@ button {
   font-size: clamp(3.2rem, 10vw, 8.2rem);
 }
 
+.auth-card h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(2.4rem, 8vw, 4.6rem);
+  font-weight: 950;
+  line-height: 0.9;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  overflow-wrap: normal;
+}
+
 .menu-actions {
   display: grid;
   gap: 10px;
   margin-top: clamp(26px, 5vw, 48px);
+}
+
+.course-picker {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.course-picker > span {
+  color: rgba(245, 247, 248, 0.68);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.course-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.course-option {
+  display: grid;
+  gap: 2px;
+  min-height: 58px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.course-option:hover,
+.course-option:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(167, 255, 91, 0.72);
+  background: rgba(167, 255, 91, 0.12);
+  outline: none;
+}
+
+.course-option.is-selected {
+  border-color: rgba(167, 255, 91, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(167, 255, 91, 0.2);
+}
+
+.course-option strong,
+.course-option small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  letter-spacing: 0;
+}
+
+.course-option strong {
+  font-size: 0.86rem;
+}
+
+.course-option small {
+  color: rgba(245, 247, 248, 0.66);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.auth-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.auth-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.auth-heading span {
+  color: rgba(245, 247, 248, 0.68);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.auth-heading strong {
+  justify-self: end;
+  min-width: 0;
+  color: #a7ff5b;
+  font-size: 0.84rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.auth-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auth-fields-stacked {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.auth-fields input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(4, 8, 10, 0.72);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 800;
+  outline: none;
+}
+
+.auth-fields input:focus {
+  border-color: rgba(167, 255, 91, 0.78);
+}
+
+.auth-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.auth-actions .menu-button {
+  min-height: 40px;
+  font-size: 0.82rem;
+}
+
+.auth-status {
+  min-height: 16px;
+  margin: 0;
+  color: rgba(245, 247, 248, 0.68);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.auth-status.is-error {
+  color: #ff8b7f;
 }
 
 .menu-button {
@@ -161,9 +332,22 @@ button {
   letter-spacing: 0;
 }
 
+.selected-car-panel span + span {
+  color: rgba(245, 247, 248, 0.72);
+  font-size: 0.84rem;
+}
+
 .screen-card,
-.garage-card {
+.garage-card,
+.auth-card {
   padding: clamp(22px, 4vw, 40px);
+}
+
+.auth-card {
+  display: grid;
+  gap: 16px;
+  width: min(92vw, 460px);
+  justify-self: center;
 }
 
 .garage-header {
@@ -411,7 +595,7 @@ button {
 .menu-return-button {
   position: absolute;
   left: 18px;
-  top: 18px;
+  bottom: 18px;
   z-index: 9;
   min-width: 76px;
   min-height: 40px;
@@ -428,6 +612,147 @@ button {
 .menu-return-button:focus-visible {
   border-color: rgba(167, 255, 91, 0.78);
   outline: none;
+}
+
+.mini-map {
+  position: absolute;
+  right: 18px;
+  bottom: 78px;
+  z-index: 8;
+  width: 220px;
+  height: 160px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(8, 12, 14, 0.64);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
+.mini-map canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.results-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 13;
+  display: grid;
+  place-items: center;
+  padding: clamp(14px, 4vw, 44px);
+  background: rgba(3, 7, 9, 0.64);
+  backdrop-filter: blur(8px);
+}
+
+.results-panel {
+  display: grid;
+  gap: 16px;
+  width: min(92vw, 680px);
+  max-height: min(86vh, 760px);
+  overflow: auto;
+  padding: clamp(18px, 4vw, 34px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(8, 12, 14, 0.86);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+}
+
+.results-header h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(2.2rem, 7vw, 4.6rem);
+  font-weight: 950;
+  line-height: 0.9;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.results-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 16px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.results-summary span,
+.leaderboard-head span {
+  color: rgba(245, 247, 248, 0.62);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.results-summary strong {
+  justify-self: end;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.leaderboard {
+  display: grid;
+  gap: 6px;
+}
+
+.leaderboard-head,
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 92px 84px;
+  gap: 8px;
+  align-items: center;
+}
+
+.leaderboard-head {
+  padding: 0 10px;
+}
+
+.leaderboard-body {
+  display: grid;
+  gap: 6px;
+}
+
+.leaderboard-row {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(245, 247, 248, 0.9);
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
+.leaderboard-row.is-player {
+  border-color: rgba(167, 255, 91, 0.78);
+  background: rgba(167, 255, 91, 0.12);
+}
+
+.leaderboard-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard-empty {
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: rgba(245, 247, 248, 0.68);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.results-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .controls-hint {
@@ -458,8 +783,76 @@ button {
   text-transform: uppercase;
 }
 
+.physics-debug {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  z-index: 10;
+  display: grid;
+  gap: 6px;
+  width: min(360px, calc(100vw - 36px));
+  max-height: calc(100vh - 92px);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(8, 12, 14, 0.76);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.22);
+  color: rgba(245, 247, 248, 0.88);
+  font: 700 0.72rem/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
+.physics-debug strong {
+  color: #a7ff5b;
+  font-size: 0.78rem;
+}
+
+.physics-debug .debug-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+}
+
+.physics-debug .debug-wheels {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.physics-debug .debug-wheel {
+  display: grid;
+  grid-template-columns: 28px repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  align-items: center;
+}
+
+.physics-debug .debug-wheel small {
+  grid-column: 1 / -1;
+  color: rgba(245, 247, 248, 0.62);
+  font-size: 0.62rem;
+  overflow-wrap: anywhere;
+}
+
+.physics-debug .debug-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.physics-debug .debug-bar span {
+  display: block;
+  height: 100%;
+  background: #a7ff5b;
+}
+
 .controls-hint[hidden],
-.menu-return-button[hidden] {
+.menu-return-button[hidden],
+.physics-debug[hidden],
+.results-overlay[hidden],
+.auth-actions .menu-button[hidden] {
   display: none;
 }
 
@@ -499,7 +892,8 @@ button {
   .menu-panel,
   .selected-car-panel,
   .screen-card,
-  .garage-card {
+  .garage-card,
+  .auth-card {
     width: min(100%, 300px);
     min-width: 0;
     justify-self: center;
@@ -516,6 +910,19 @@ button {
 
   .garage-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-fields,
+  .auth-actions,
+  .results-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .leaderboard-head,
+  .leaderboard-row {
+    grid-template-columns: 40px minmax(0, 1fr) 78px 58px;
+    gap: 6px;
+    font-size: 0.74rem;
   }
 
   #hud {
@@ -574,9 +981,16 @@ button {
     bottom: 10px;
   }
 
+  .mini-map {
+    right: 10px;
+    bottom: 68px;
+    width: 168px;
+    height: 122px;
+  }
+
   .menu-return-button {
     left: 10px;
-    top: 10px;
+    bottom: 10px;
   }
 
   .controls-hint {
@@ -584,5 +998,13 @@ button {
     grid-template-columns: minmax(0, 1fr);
     width: calc(100vw - 20px);
     font-size: 0.76rem;
+  }
+
+  .physics-debug {
+    top: auto;
+    right: 10px;
+    bottom: 68px;
+    width: calc(100vw - 20px);
+    max-height: 42vh;
   }
 }

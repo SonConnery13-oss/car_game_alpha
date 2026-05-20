@@ -21,12 +21,41 @@
 
       <section id="mainMenu" class="menu-shell" aria-label="Main menu">
         <div class="menu-panel menu-panel-primary">
-          <p class="menu-kicker">CITY CIRCUIT</p>
+          <p class="menu-kicker">MOUNTAIN PASS</p>
           <h1>Racing Prototype</h1>
           <div class="menu-actions" aria-label="Menu actions">
             <button class="menu-button is-primary" id="gameStartButton" type="button">Game Start!</button>
             <button class="menu-button" id="developersButton" type="button">Game Developers</button>
             <button class="menu-button" id="garageButton" type="button">Garage</button>
+          </div>
+          <div class="course-picker" aria-label="Course selector">
+            <span>Course</span>
+            <div class="course-grid">
+              <button class="course-option is-selected" type="button" data-course-id="map1">
+                <strong>Akina Ridge</strong>
+                <small>7.5 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="map2">
+                <strong>Iroha Switchbacks</strong>
+                <small>5.1 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="map3">
+                <strong>Happo Forest</strong>
+                <small>5.5 km</small>
+              </button>
+            </div>
+          </div>
+          <div id="authPanel" class="auth-panel" aria-label="Player account">
+            <div class="auth-heading">
+              <span>Player ID</span>
+              <strong id="authCurrentPlayer">Not signed in</strong>
+            </div>
+            <div class="auth-actions">
+              <button class="menu-button" id="authLoginButton" type="button">Login</button>
+              <button class="menu-button is-primary" id="authSignupButton" type="button">Sign Up</button>
+              <button class="menu-button" id="authLogoutButton" type="button" hidden>Logout</button>
+            </div>
+            <p id="authStatus" class="auth-status" data-auth-status aria-live="polite"></p>
           </div>
         </div>
 
@@ -35,7 +64,46 @@
             <div id="selectedCarImage" class="garage-preview garage-preview-gt3"></div>
           </div>
           <span id="selectedCarName">GT3 RS Prototype</span>
+          <span id="selectedCourseName">Map 1 / 7.552 km</span>
         </aside>
+      </section>
+
+      <section id="loginScreen" class="menu-screen auth-screen" aria-label="Login" hidden>
+        <form id="loginForm" class="auth-card" aria-label="Login form">
+          <div class="auth-screen-header">
+            <p class="menu-kicker">PLAYER LOGIN</p>
+            <h2>Login</h2>
+          </div>
+          <div class="auth-fields auth-fields-stacked">
+            <input id="loginIdInput" type="text" autocomplete="username" maxlength="16" placeholder="ID" />
+            <input id="loginPasswordInput" type="password" autocomplete="current-password" maxlength="24" placeholder="Password" />
+          </div>
+          <p class="auth-status" data-auth-status aria-live="polite"></p>
+          <div class="auth-actions">
+            <button class="menu-button is-primary" type="submit">Login</button>
+            <button class="menu-button" id="loginToSignupButton" type="button">Sign Up</button>
+            <button class="menu-button" data-menu-back type="button">Back</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="signupScreen" class="menu-screen auth-screen" aria-label="Sign up" hidden>
+        <form id="signupForm" class="auth-card" aria-label="Sign up form">
+          <div class="auth-screen-header">
+            <p class="menu-kicker">CREATE PLAYER</p>
+            <h2>Sign Up</h2>
+          </div>
+          <div class="auth-fields auth-fields-stacked">
+            <input id="signupIdInput" type="text" autocomplete="username" maxlength="16" placeholder="ID" />
+            <input id="signupPasswordInput" type="password" autocomplete="new-password" maxlength="24" placeholder="Password" />
+          </div>
+          <p class="auth-status" data-auth-status aria-live="polite"></p>
+          <div class="auth-actions">
+            <button class="menu-button is-primary" type="submit">Sign Up</button>
+            <button class="menu-button" id="signupToLoginButton" type="button">Login</button>
+            <button class="menu-button" data-menu-back type="button">Back</button>
+          </div>
+        </form>
       </section>
 
       <section id="developersScreen" class="menu-screen" aria-label="Game developers" hidden>
@@ -72,7 +140,7 @@
         </div>
 
         <div class="hud-panel lap-panel">
-          <span>LAP</span>
+          <span id="lapLabel">LAP</span>
           <strong id="lapValue">0</strong>
           <span>NOW</span>
           <strong id="currentLapValue">00.000</strong>
@@ -88,14 +156,52 @@
 
       <button id="menuReturnButton" class="menu-return-button" type="button" hidden>Menu</button>
 
+      <section id="resultsOverlay" class="results-overlay" aria-label="Race results" hidden>
+        <div class="results-panel">
+          <div class="results-header">
+            <p class="menu-kicker">FINISH</p>
+            <h2 id="resultsTitle">Race Complete</h2>
+          </div>
+          <div class="results-summary">
+            <span>Course</span>
+            <strong id="resultsCourse">--</strong>
+            <span>ID</span>
+            <strong id="resultsPlayer">--</strong>
+            <span>Time</span>
+            <strong id="resultsTime">--.---</strong>
+          </div>
+          <div class="leaderboard" aria-label="Leaderboard">
+            <div class="leaderboard-head">
+              <span>Rank</span>
+              <span>ID</span>
+              <span>Best</span>
+              <span>Gap</span>
+            </div>
+            <div id="leaderboardBody" class="leaderboard-body"></div>
+          </div>
+          <div class="results-actions">
+            <button class="menu-button" id="resultMenuButton" type="button">Menu</button>
+            <button class="menu-button is-primary" id="resultRetryButton" type="button">Retry?</button>
+          </div>
+        </div>
+      </section>
+
       <aside id="controlsHint" class="controls-hint" aria-label="Controls" hidden>
         <strong>Controls</strong>
         <span>W / Left Mouse: Accelerate</span>
         <span>S / Right Mouse: Brake</span>
         <span>A D / Mouse X: Steer</span>
         <span>LShift: Drift</span>
+        <span>Gamepad RT / LT: Throttle / Brake</span>
+        <span>Gamepad Left Stick: Steer</span>
         <span>F: Mouse Control</span>
-        <span>Right Mouse: Orbit Camera</span>
+        <span>Space / Gamepad A: Handbrake</span>
+      </aside>
+
+      <aside id="physicsDebug" class="physics-debug" aria-label="Physics debug" hidden></aside>
+
+      <aside id="miniMap" class="mini-map" aria-label="Course minimap">
+        <canvas id="miniMapCanvas" width="220" height="160"></canvas>
       </aside>
 
       <button id="startButton" class="icon-button is-running" type="button" aria-label="Pause or resume">
