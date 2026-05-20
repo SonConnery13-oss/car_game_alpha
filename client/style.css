@@ -64,6 +64,9 @@ button {
 
 .auth-screen {
   grid-template-columns: minmax(280px, 480px);
+  align-items: start;
+  overflow-y: auto;
+  padding-block: clamp(14px, 4vh, 44px);
 }
 
 .menu-panel,
@@ -397,7 +400,34 @@ button {
   display: grid;
   gap: 16px;
   width: min(92vw, 460px);
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  align-self: start;
   justify-self: center;
+}
+
+@media (max-height: 560px) {
+  .auth-screen {
+    padding-block: 10px;
+  }
+
+  .auth-card {
+    gap: 10px;
+    max-height: calc(100vh - 20px);
+    padding: 14px;
+  }
+
+  .auth-card .menu-kicker {
+    margin-bottom: 6px;
+  }
+
+  .auth-card h2 {
+    font-size: clamp(1.9rem, 12vh, 2.8rem);
+  }
+
+  .auth-actions .menu-button {
+    min-height: 38px;
+  }
 }
 
 .rankings-card {
@@ -1060,6 +1090,22 @@ button {
     width: min(100%, 300px);
     min-width: 0;
     justify-self: center;
+  }
+
+  .auth-screen {
+    justify-content: flex-start;
+    padding-block: 10px;
+  }
+
+  .auth-card {
+    gap: 12px;
+    width: min(100%, 340px);
+    max-height: calc(100vh - 20px);
+    padding: clamp(16px, 5vw, 22px);
+  }
+
+  .auth-card h2 {
+    font-size: clamp(2rem, 12vw, 3rem);
   }
 
   .menu-panel h1 {
