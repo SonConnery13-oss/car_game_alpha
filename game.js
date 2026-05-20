@@ -72,6 +72,7 @@ const STORAGE_KEYS = {
 const DEFAULT_ROAD_WIDTH = 14;
 const FIXED_TIME_STEP = 1 / 120;
 const TERRAIN_SIZE = 1120;
+const SKY_DOME_RADIUS = 900;
 const TERRAIN_SEGMENTS = 320;
 const TERRAIN_ELEMENT_SIZE = TERRAIN_SIZE / TERRAIN_SEGMENTS;
 const WHEEL_RADIUS = 0.42;
@@ -155,6 +156,7 @@ const initialCourseId = URL_PARAMS.get("track") ?? URL_PARAMS.get("course");
 let selectedCourseId = COURSE_DEFS[initialCourseId] ? initialCourseId : DEFAULT_COURSE_ID;
 let rankingsCourseId = selectedCourseId;
 let activeCourse = COURSE_DEFS[selectedCourseId];
+let skyDome = null;
 const ROAD_WIDTH = activeCourse.roadWidth ?? DEFAULT_ROAD_WIDTH;
 const trackPoints = createTrackPoints(activeCourse);
 const START_INDEX = activeCourse.startIndex ?? 0;
@@ -226,10 +228,10 @@ world.addContactMaterial(
 );
 world.addContactMaterial(
   new CANNON.ContactMaterial(carMaterial, barrierMaterial, {
-    friction: 0.18,
-    restitution: 0.32,
-    contactEquationStiffness: 7e5,
-    contactEquationRelaxation: 4,
+    friction: 0.015,
+    restitution: 0.08,
+    contactEquationStiffness: 9e5,
+    contactEquationRelaxation: 3,
   }),
 );
 
@@ -250,6 +252,10 @@ let driftAmount = 0;
 let driftScore = 0;
 let driftLabelSprite = null;
 const driftSmokeParticles = [];
+const wallSparkParticles = [];
+const WALL_SPARK_GEOMETRY = new THREE.SphereGeometry(0.035, 6, 4);
+const WALL_SPARK_COLORS = [0xfff1a6, 0xffc247, 0xff742f];
+let lastWallSparkAt = 0;
 const vehicleDynamics = {
   braking: false,
   throttle: false,
@@ -567,7 +573,8 @@ function createWorld() {
 }
 
 function createSky() {
-  const skyGeometry = new THREE.SphereGeometry(520, 32, 18);
+  scene.background = new THREE.Color(0xe8f5ff);
+  const skyGeometry = new THREE.SphereGeometry(SKY_DOME_RADIUS, 32, 18);
   const skyMaterial = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -578,8 +585,8 @@ function createSky() {
     vertexShader: `
       varying vec3 vWorldPosition;
       void main() {
+        vWorldPosition = position.xyz;
         vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPosition = worldPosition.xyz;
         gl_Position = projectionMatrix * viewMatrix * worldPosition;
       }
     `,
@@ -596,6 +603,8 @@ function createSky() {
   });
 
   const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+  sky.frustumCulled = false;
+  skyDome = sky;
   scene.add(sky);
 }
 
@@ -1119,6 +1128,7 @@ function addInstancedMesh(geometry, material, matrices, castShadow = false) {
 
 function createGuardRailCollision(centerX, centerY, centerZ, angle, length) {
   const body = new CANNON.Body({ mass: 0, material: barrierMaterial });
+  body.userData = { type: "barrier" };
   body.position.set(centerX, centerY, centerZ);
   body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
   body.addShape(new CANNON.Box(new CANNON.Vec3(length / 2, 0.62, 0.26)));
@@ -1412,6 +1422,7 @@ function createLowWallSegment(a, b, material, height = 0.52, thickness = 0.34, e
   scene.add(mesh);
 
   const body = new CANNON.Body({ mass: 0, material: barrierMaterial });
+  body.userData = { type: "barrier" };
   body.position.set(centerX, groundY + height / 2 + 0.03, centerZ);
   body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
   body.addShape(new CANNON.Box(new CANNON.Vec3(length / 2, height / 2, thickness / 2)));
@@ -2257,6 +2268,7 @@ function createVehicle() {
   chassisBody.quaternion.setFromEuler(0, START_YAW, 0);
   chassisBody.collisionFilterGroup = 2;
   chassisBody.collisionFilterMask = 1;
+  chassisBody.addEventListener("collide", handleChassisCollision);
   world.addBody(chassisBody);
 
   const vehicle = new VehiclePhysics({
@@ -3182,6 +3194,7 @@ function createBarrierSegment(a, b, material) {
   scene.add(mesh);
 
   const body = new CANNON.Body({ mass: 0, material: barrierMaterial });
+  body.userData = { type: "barrier" };
   body.position.set(centerX, groundY + height / 2 + 0.1, centerZ);
   body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
   body.addShape(new CANNON.Box(new CANNON.Vec3(length / 2, height / 2, thickness / 2)));
@@ -4332,6 +4345,7 @@ function updateVehicleMeshes(delta) {
   updateTunedMassVisual();
   emitDriftSmoke(delta);
   updateDriftSmoke(delta);
+  updateWallSparks(delta);
   updateDriftLabel(delta);
 }
 
@@ -4487,6 +4501,107 @@ function updateDriftSmoke(delta) {
       puff.geometry.dispose();
       puff.material.dispose();
       driftSmokeParticles.splice(i, 1);
+    }
+  }
+}
+
+function handleChassisCollision(event) {
+  if (event.body?.userData?.type !== "barrier" || !event.contact) return;
+
+  const contact = event.contact;
+  const normal = getBarrierContactNormal(contact);
+  if (!normal) return;
+
+  const speed = chassisBody.velocity.length();
+  const normalSpeed = chassisBody.velocity.dot(normal);
+  const tangentSpeed = Math.sqrt(Math.max(0, speed * speed - normalSpeed * normalSpeed));
+
+  if (normalSpeed < -0.1) {
+    const slideCorrection = -normalSpeed * 0.82;
+    chassisBody.velocity.x += normal.x * slideCorrection;
+    chassisBody.velocity.y += normal.y * slideCorrection;
+    chassisBody.velocity.z += normal.z * slideCorrection;
+  }
+
+  const impact = Math.max(0, -normalSpeed) + tangentSpeed * 0.28;
+  const now = performance.now();
+  if (impact < 4.2 || now - lastWallSparkAt < 34) return;
+
+  const point = getBarrierContactPoint(contact);
+  emitWallSparks(point, normal, tangentSpeed, impact);
+  lastWallSparkAt = now;
+}
+
+function getBarrierContactNormal(contact) {
+  if (contact.bi === chassisBody) {
+    return new CANNON.Vec3(-contact.ni.x, -contact.ni.y, -contact.ni.z);
+  }
+
+  if (contact.bj === chassisBody) {
+    return new CANNON.Vec3(contact.ni.x, contact.ni.y, contact.ni.z);
+  }
+
+  return null;
+}
+
+function getBarrierContactPoint(contact) {
+  const body = contact.bi === chassisBody ? contact.bi : contact.bj;
+  const offset = contact.bi === chassisBody ? contact.ri : contact.rj;
+  return new THREE.Vector3(
+    body.position.x + offset.x,
+    body.position.y + offset.y,
+    body.position.z + offset.z,
+  );
+}
+
+function emitWallSparks(point, normal, tangentSpeed, impact) {
+  const normalVector = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
+  const carVelocity = new THREE.Vector3(chassisBody.velocity.x, chassisBody.velocity.y, chassisBody.velocity.z);
+  const tangent = carVelocity.clone().addScaledVector(normalVector, -carVelocity.dot(normalVector));
+  if (tangent.lengthSq() < 0.001) tangent.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+  tangent.normalize();
+
+  const count = THREE.MathUtils.clamp(Math.floor(impact * 1.2), 5, 18);
+  for (let i = 0; i < count; i += 1) {
+    const color = WALL_SPARK_COLORS[Math.floor(Math.random() * WALL_SPARK_COLORS.length)];
+    const spark = new THREE.Mesh(
+      WALL_SPARK_GEOMETRY,
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    spark.position.copy(point);
+    spark.position.addScaledVector(normalVector, 0.08 + Math.random() * 0.1);
+    spark.scale.setScalar(0.8 + Math.random() * 1.6);
+    spark.userData.life = 0.24 + Math.random() * 0.16;
+    spark.userData.maxLife = spark.userData.life;
+    spark.userData.velocity = tangent
+      .clone()
+      .multiplyScalar((0.8 + Math.random() * 2.8) * Math.min(tangentSpeed, 36) * 0.08)
+      .addScaledVector(normalVector, 0.9 + Math.random() * 1.8);
+    spark.userData.velocity.y += 0.65 + Math.random() * 1.35;
+    wallSparkParticles.push(spark);
+    scene.add(spark);
+  }
+}
+
+function updateWallSparks(delta) {
+  for (let i = wallSparkParticles.length - 1; i >= 0; i -= 1) {
+    const spark = wallSparkParticles[i];
+    spark.userData.life -= delta;
+    spark.userData.velocity.y -= 7.2 * delta;
+    spark.position.addScaledVector(spark.userData.velocity, delta);
+    spark.scale.multiplyScalar(1 - Math.min(delta * 2.6, 0.65));
+    spark.material.opacity = Math.max(0, spark.userData.life / spark.userData.maxLife);
+
+    if (spark.userData.life <= 0) {
+      scene.remove(spark);
+      spark.material.dispose();
+      wallSparkParticles.splice(i, 1);
     }
   }
 }
@@ -5118,6 +5233,11 @@ function resetCar() {
     puff.geometry.dispose();
     puff.material.dispose();
   }
+  for (const spark of wallSparkParticles.splice(0)) {
+    scene.remove(spark);
+    spark.material.dispose();
+  }
+  lastWallSparkAt = 0;
   for (const wheelState of wheelVisualStates) {
     wheelState.compression = 0;
     wheelState.previousCompression = 0;
@@ -5204,6 +5324,7 @@ function animate() {
 
     updateVehicleMeshes(delta);
     updateCamera(delta);
+    if (skyDome) skyDome.position.copy(camera.position);
     const displayKmh = Math.round(chassisBody.velocity.length() * 3.6);
     gearValue.textContent = estimateGear(displayKmh);
     updatePhysicsDebug(displayKmh);
