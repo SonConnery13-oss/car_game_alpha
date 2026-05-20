@@ -4,6 +4,9 @@
   "private": true,
   "description": "Three.js racing game with Socket.IO multiplayer rooms.",
   "main": "server/server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server/server.js",
     "dev": "node server/server.js",

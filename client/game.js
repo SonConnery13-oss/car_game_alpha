@@ -3659,12 +3659,13 @@ function initializeMultiplayer() {
   multiplayer.roomId = initialRoomId;
   if (roomIdInput) roomIdInput.value = initialRoomId;
 
-  if (typeof window.io !== "function") {
+  if (typeof io !== "function") {
     setMultiplayerStatus("Offline");
     return;
   }
 
-  multiplayer.socket = window.io();
+  const socket = io();
+  multiplayer.socket = socket;
   setMultiplayerStatus("Connecting");
 
   multiplayer.socket.on("connect", () => {

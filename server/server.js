@@ -4,6 +4,7 @@ const path = require("path");
 const { Server } = require("socket.io");
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
 const CLIENT_DIR = path.join(__dirname, "..", "client");
 const DEFAULT_ROOM_ID = "lobby";
 
@@ -172,6 +173,6 @@ function normalizeNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-server.listen(PORT, () => {
-  console.log(`Multiplayer server running on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Multiplayer server running on port ${PORT}`);
 });
