@@ -93,9 +93,9 @@ const BRIDGE_ROUTES = [
 const TRACK_SURFACE_OFFSET = 0.065;
 const MAX_FORWARD_SPEED = 200 / 3.6;
 const STEERING_INPUT_RESPONSE = {
-  keyboard: 3.2,
-  analog: 6.4,
-  return: 5.8,
+  keyboard: 2.2,
+  analog: 4.8,
+  return: 4.0,
 };
 const VISUAL_SUSPENSION = {
   stiffness: 260,
