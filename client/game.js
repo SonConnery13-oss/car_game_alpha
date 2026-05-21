@@ -364,6 +364,7 @@ let raceCountdownActive = false;
 let raceCountdownToken = 0;
 let raceFinished = false;
 let currentPlayer = null;
+let sharedLeaderboard = {};
 
 setupLighting();
 createWorld();
@@ -3734,6 +3735,9 @@ function initializeMultiplayer() {
   multiplayer.socket.on("multiplayer:playerUpdated", createOrUpdateRemotePlayer);
   multiplayer.socket.on("multiplayer:state", handleRemotePlayerState);
   multiplayer.socket.on("multiplayer:playerLeft", ({ id }) => removeRemotePlayer(id));
+  multiplayer.socket.on("leaderboard:snapshot", handleLeaderboardSnapshot);
+  multiplayer.socket.on("leaderboard:updated", handleLeaderboardUpdated);
+  multiplayer.socket.on("leaderboard:accepted", handleLeaderboardAccepted);
 }
 
 function joinMultiplayerRoom(roomId = "lobby", isReconnect = false) {
@@ -3768,8 +3772,128 @@ function handleMultiplayerJoined(payload = {}) {
     createOrUpdateRemotePlayer(player);
   }
 
+  if (payload.leaderboard) {
+    handleLeaderboardSnapshot({ leaderboard: payload.leaderboard });
+  } else {
+    requestLeaderboardSnapshot();
+  }
+
   updateMultiplayerRoomStatus(payload.players?.length ?? remotePlayers.size + 1);
   sendMultiplayerState(true);
+}
+
+function requestLeaderboardSnapshot() {
+  if (!multiplayer.socket?.connected) return;
+  multiplayer.socket.emit("leaderboard:request");
+}
+
+function submitLeaderboardRecord(record, courseId = selectedCourseId) {
+  if (!record || !multiplayer.socket?.connected) return;
+
+  multiplayer.socket.emit("leaderboard:submit", {
+    courseId,
+    record,
+  });
+}
+
+function handleLeaderboardSnapshot(payload = {}) {
+  sharedLeaderboard = normalizeLeaderboardPayload(payload.leaderboard);
+  refreshLeaderboardViews();
+}
+
+function handleLeaderboardUpdated(payload = {}) {
+  const courseId = normalizeCourseId(payload.courseId);
+  if (!courseId) return;
+
+  sharedLeaderboard = {
+    ...sharedLeaderboard,
+    [courseId]: normalizeLeaderboardRecords(payload.records),
+  };
+  refreshLeaderboardViews();
+}
+
+function handleLeaderboardAccepted(payload = {}) {
+  if (payload.leaderboard) {
+    handleLeaderboardSnapshot({ leaderboard: payload.leaderboard });
+    return;
+  }
+
+  handleLeaderboardUpdated(payload);
+}
+
+function refreshLeaderboardViews() {
+  if (rankingsScreen && !rankingsScreen.hidden) renderRankingsScreen();
+  if (resultsOverlay && !resultsOverlay.hidden) renderLeaderboard(currentPlayer?.key ?? null);
+}
+
+function normalizeLeaderboardPayload(payload = {}) {
+  const normalized = {};
+
+  for (const [rawCourseId, records] of Object.entries(payload ?? {})) {
+    const courseId = normalizeCourseId(rawCourseId);
+    if (!courseId) continue;
+    normalized[courseId] = normalizeLeaderboardRecords(records);
+  }
+
+  return normalized;
+}
+
+function normalizeLeaderboardRecords(records = []) {
+  const byKey = new Map();
+  const values = Array.isArray(records) ? records : Object.values(records ?? {});
+
+  for (const rawRecord of values) {
+    const record = normalizeLeaderboardRecord(rawRecord);
+    if (record) rememberBestLeaderboardRecord(byKey, record);
+  }
+
+  return [...byKey.values()].sort(compareLeaderboardRecords);
+}
+
+function normalizeLeaderboardRecord(record = {}) {
+  if (!record || typeof record !== "object") return null;
+
+  const time = Number(record.time);
+  if (!Number.isFinite(time) || time <= 0) return null;
+
+  const key = normalizeLeaderboardKey(record.key ?? record.playerId ?? record.id);
+  if (!key) return null;
+
+  const id = String(record.id ?? key).trim().slice(0, 24) || "PLAYER";
+  const carId = String(record.carId ?? "gt3").trim().slice(0, 24) || "gt3";
+  const finishedAt = Number(record.finishedAt);
+
+  return {
+    id,
+    key,
+    time,
+    carId,
+    finishedAt: Number.isFinite(finishedAt) ? finishedAt : Date.now(),
+  };
+}
+
+function normalizeCourseId(courseId) {
+  const value = String(courseId || "").trim().slice(0, 24);
+  return COURSE_DEFS[value] ? value : null;
+}
+
+function normalizeLeaderboardKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 32);
+}
+
+function rememberBestLeaderboardRecord(recordsByKey, record) {
+  const previous = recordsByKey.get(record.key);
+  if (!previous || record.time < previous.time) {
+    recordsByKey.set(record.key, record);
+  }
+}
+
+function compareLeaderboardRecords(a, b) {
+  return a.time - b.time || a.id.localeCompare(b.id);
 }
 
 function createOrUpdateRemotePlayer(player = {}) {
@@ -5450,18 +5574,32 @@ function saveLeaderboardRecord(finishTime) {
     saveStoredJson(STORAGE_KEYS.leaderboard, leaderboard);
   }
 
+  const bestRecord = courseRecords[currentPlayer.key] ?? record;
+  submitLeaderboardRecord(bestRecord, selectedCourseId);
+
   return {
-    record: courseRecords[currentPlayer.key] ?? record,
+    record: bestRecord,
     isPersonalBest,
   };
 }
 
 function getCourseLeaderboard(courseId = selectedCourseId) {
   const leaderboard = loadStoredJson(STORAGE_KEYS.leaderboard, {});
-  const courseRecords = leaderboard[courseId] ?? {};
-  return Object.values(courseRecords)
-    .filter((record) => Number.isFinite(record.time))
-    .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  const recordsByKey = new Map();
+
+  addLeaderboardRecords(recordsByKey, leaderboard[courseId]);
+  addLeaderboardRecords(recordsByKey, sharedLeaderboard[courseId]);
+
+  return [...recordsByKey.values()].sort(compareLeaderboardRecords);
+}
+
+function addLeaderboardRecords(recordsByKey, source) {
+  const records = Array.isArray(source) ? source : Object.values(source ?? {});
+
+  for (const rawRecord of records) {
+    const record = normalizeLeaderboardRecord(rawRecord);
+    if (record) rememberBestLeaderboardRecord(recordsByKey, record);
+  }
 }
 
 function showResultsOverlay(finishTime, savedRecord) {

@@ -24,10 +24,15 @@ package.json
 
 - serves every file in `client/` with Express
 - runs the Socket.IO server on the same domain
+- stores and broadcasts shared course rankings from race finish times
 
 Because the client loads `/socket.io/socket.io.js` and connects with `io()`, the
 browser automatically connects back to the same deployed server that served the
 game page.
+
+Finished race times are submitted to the Node server and broadcast to connected
+players, so the Rankings screen and finish leaderboard can show other users'
+best start-to-finish records. Local browser records are still used as a fallback.
 
 ## Local Run
 

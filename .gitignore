@@ -8,3 +8,4 @@ video_contact_sheet*.jpg
 node_modules/
 .env
 .env.*
+server/data/leaderboard.json
