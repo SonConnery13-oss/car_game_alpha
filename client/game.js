@@ -313,7 +313,7 @@ const boostSpeedStreaks = [];
 const WALL_SPARK_GEOMETRY = new THREE.SphereGeometry(0.035, 6, 4);
 const WALL_SPARK_COLORS = [0xfff1a6, 0xffc247, 0xff742f];
 const TIRE_MARK_GEOMETRY = new THREE.BoxGeometry(0.34, 0.012, 1.08);
-const BRAKE_TRAIL_GEOMETRY = new THREE.BoxGeometry(0.13, 0.04, 1.7);
+const BRAKE_TRAIL_GEOMETRY = new THREE.BoxGeometry(0.13, 0.04, 1);
 const BOOST_STREAK_GEOMETRY = new THREE.BoxGeometry(0.045, 0.045, 2.7);
 const BOOST_STREAK_COLORS = [0x69c8ff, 0xa7ff5b, 0xff4fd8, 0xffd45a, 0xffffff];
 const TIRE_MARK_HOLD_SECONDS = 5;
@@ -326,6 +326,7 @@ let lastWallSparkAt = 0;
 let tireMarkAccumulator = 0;
 let brakeTrailAccumulator = 0;
 let boostStreakAccumulator = 0;
+const brakeTrailLastPoints = [null, null];
 const vehicleDynamics = {
   braking: false,
   throttle: false,
@@ -5844,37 +5845,58 @@ function updateDriftTireMarks(delta) {
 
 function emitBrakeLightTrails(delta) {
   const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
-  const driftTrail = driftAmount > 0.18 && vehicleDynamics.grounded && speedAbs > 6.5;
   const brakeTrail = vehicleDynamics.braking && speedAbs > 2.2;
-  if (paused || (!driftTrail && !brakeTrail)) {
-    brakeTrailAccumulator = Math.min(brakeTrailAccumulator, 0.4);
+  if (paused || !brakeTrail) {
+    resetBrakeTrailAnchors();
     return;
   }
 
-  const intensity = Math.max(brakeTrail ? 0.95 : 0, driftTrail ? THREE.MathUtils.lerp(0.55, 0.95, driftAmount) : 0);
-  brakeTrailAccumulator += delta * THREE.MathUtils.lerp(8, 18, intensity);
+  const intensity = THREE.MathUtils.lerp(0.52, 1, THREE.MathUtils.clamp(vehiclePhysics.brake ?? 0, 0, 1));
+  brakeTrailAccumulator += delta * THREE.MathUtils.lerp(12, 26, intensity);
+  if (brakeTrailAccumulator < 1) return;
 
-  let emitted = 0;
-  while (brakeTrailAccumulator >= 1 && emitted < 3) {
-    brakeTrailAccumulator -= 1;
-    createBrakeLightTrail(-1, intensity);
-    createBrakeLightTrail(1, intensity);
-    emitted += 1;
-  }
+  brakeTrailAccumulator -= Math.floor(brakeTrailAccumulator);
+  createBrakeLightTrail(-1, intensity);
+  createBrakeLightTrail(1, intensity);
   trimEffectArray(brakeLightTrails, 320);
 }
 
-function createBrakeLightTrail(side, intensity) {
+function getBrakeTrailIndex(side) {
+  return side < 0 ? 0 : 1;
+}
+
+function resetBrakeTrailAnchors() {
+  brakeTrailAccumulator = 0;
+  brakeTrailLastPoints[0] = null;
+  brakeTrailLastPoints[1] = null;
+}
+
+function getBrakeLightWorldPosition(side) {
   const forward = getHorizontalVehicleForward();
   const right = getHorizontalVehicleRight();
-  const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
-  const speedFactor = THREE.MathUtils.clamp(speedAbs / 42, 0, 1);
-  const lengthScale = THREE.MathUtils.lerp(0.78, 1.55, Math.max(intensity, speedFactor));
   const rearLight = carVisualMotion.position
     .clone()
     .addScaledVector(right, side * 0.62)
     .addScaledVector(forward, -2.12);
   rearLight.y += 0.42;
+  return rearLight;
+}
+
+function createBrakeLightTrail(side, intensity) {
+  const index = getBrakeTrailIndex(side);
+  const current = getBrakeLightWorldPosition(side);
+  const previous = brakeTrailLastPoints[index];
+  brakeTrailLastPoints[index] = current.clone();
+  if (!previous) return;
+
+  const segment = current.clone().sub(previous);
+  const length = segment.length();
+  if (length < 0.045) return;
+
+  const horizontalSegment = new THREE.Vector3(segment.x, 0, segment.z);
+  const direction = horizontalSegment.lengthSq() > 0.0001
+    ? horizontalSegment.normalize()
+    : getHorizontalVehicleForward();
 
   const trail = new THREE.Mesh(
     BRAKE_TRAIL_GEOMETRY,
@@ -5886,22 +5908,25 @@ function createBrakeLightTrail(side, intensity) {
       depthWrite: false,
     }),
   );
-  trail.position.copy(rearLight).addScaledVector(forward, -0.88 * lengthScale);
-  trail.quaternion.copy(getYawQuaternion(forward));
-  trail.scale.z = lengthScale;
+  trail.position.copy(previous).lerp(current, 0.5);
+  trail.quaternion.copy(getYawQuaternion(direction));
+  trail.scale.set(
+    THREE.MathUtils.lerp(0.75, 1.18, intensity),
+    1,
+    Math.max(length, 0.12),
+  );
   trail.renderOrder = 12;
   trail.userData.age = 0;
   trail.userData.hold = BRAKE_TRAIL_HOLD_SECONDS;
   trail.userData.fade = BRAKE_TRAIL_FADE_SECONDS;
   trail.userData.initialOpacity = trail.material.opacity;
-  trail.userData.velocity = forward.clone().multiplyScalar(-THREE.MathUtils.lerp(0.8, 4.5, speedFactor));
 
   brakeLightTrails.push(trail);
   scene.add(trail);
 }
 
 function updateBrakeLightTrails(delta) {
-  updateFadingMeshList(brakeLightTrails, delta, true);
+  updateFadingMeshList(brakeLightTrails, delta);
 }
 
 function emitBoostSpeedStreaks(delta) {
@@ -5910,32 +5935,44 @@ function emitBoostSpeedStreaks(delta) {
     return;
   }
 
-  boostStreakAccumulator += delta * THREE.MathUtils.lerp(18, 48, boostAmount);
+  boostStreakAccumulator += delta * THREE.MathUtils.lerp(26, 66, boostAmount);
   let emitted = 0;
-  while (boostStreakAccumulator >= 1 && emitted < 6) {
+  while (boostStreakAccumulator >= 1 && emitted < 8) {
     boostStreakAccumulator -= 1;
-    createBoostSpeedStreak();
+    createBoostSpeedStreak(false);
+    if (Math.random() < 0.72) createBoostSpeedStreak(true);
     emitted += 1;
   }
-  trimEffectArray(boostSpeedStreaks, 160);
+  trimEffectArray(boostSpeedStreaks, 280);
 }
 
-function createBoostSpeedStreak() {
+function createBoostSpeedStreak(background = false) {
   const forward = getHorizontalVehicleForward();
   const right = getHorizontalVehicleRight();
   const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
   const color = BOOST_STREAK_COLORS[Math.floor(Math.random() * BOOST_STREAK_COLORS.length)];
-  const side = (Math.random() - 0.5) * 2.9;
-  const longitudinal = THREE.MathUtils.lerp(-2.3, 1.6, Math.random());
-  const height = THREE.MathUtils.lerp(0.32, 1.3, Math.random());
-  const lengthScale = THREE.MathUtils.lerp(0.85, 2.25, boostAmount);
+  const sideSign = Math.random() < 0.5 ? -1 : 1;
+  const side = background
+    ? sideSign * THREE.MathUtils.lerp(4.5, 18, Math.random())
+    : (Math.random() - 0.5) * 2.9;
+  const longitudinal = background
+    ? THREE.MathUtils.lerp(-14, 24, Math.random())
+    : THREE.MathUtils.lerp(-2.3, 1.6, Math.random());
+  const height = background
+    ? THREE.MathUtils.lerp(1.1, 5.6, Math.random())
+    : THREE.MathUtils.lerp(0.32, 1.3, Math.random());
+  const lengthScale = background
+    ? THREE.MathUtils.lerp(2.2, 5.4, boostAmount)
+    : THREE.MathUtils.lerp(0.85, 2.25, boostAmount);
 
   const streak = new THREE.Mesh(
     BOOST_STREAK_GEOMETRY,
     new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: THREE.MathUtils.lerp(0.42, 0.88, boostAmount),
+      opacity: background
+        ? THREE.MathUtils.lerp(0.24, 0.58, boostAmount)
+        : THREE.MathUtils.lerp(0.42, 0.88, boostAmount),
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
@@ -5946,14 +5983,21 @@ function createBoostSpeedStreak() {
     .addScaledVector(forward, longitudinal);
   streak.position.y += height;
   streak.quaternion.copy(getYawQuaternion(forward));
+  streak.scale.setScalar(background ? THREE.MathUtils.lerp(1.15, 1.85, Math.random()) : 1);
   streak.scale.z = lengthScale;
   streak.renderOrder = 13;
-  streak.userData.life = THREE.MathUtils.lerp(0.28, 0.48, Math.random());
+  streak.userData.life = background
+    ? THREE.MathUtils.lerp(0.46, 0.72, Math.random())
+    : THREE.MathUtils.lerp(0.28, 0.48, Math.random());
   streak.userData.maxLife = streak.userData.life;
   streak.userData.velocity = forward
     .clone()
-    .multiplyScalar(-(24 + Math.random() * 34 + speedAbs * 0.58))
-    .addScaledVector(right, (Math.random() - 0.5) * 4);
+    .multiplyScalar(
+      background
+        ? -(38 + Math.random() * 52 + speedAbs * 0.72)
+        : -(24 + Math.random() * 34 + speedAbs * 0.58),
+    )
+    .addScaledVector(right, (Math.random() - 0.5) * (background ? 9 : 4));
 
   boostSpeedStreaks.push(streak);
   scene.add(streak);
@@ -6900,7 +6944,7 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   }
   lastWallSparkAt = 0;
   tireMarkAccumulator = 0;
-  brakeTrailAccumulator = 0;
+  resetBrakeTrailAnchors();
   boostStreakAccumulator = 0;
   for (const wheelState of wheelVisualStates) {
     wheelState.compression = 0;
