@@ -185,6 +185,13 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     brakeDriftRearBrakeScale: 1.18,
     brakeDriftRearLateralScale: 0.64,
     brakeDriftYawAssist: 0.42,
+    handbrakeTorqueScale: 0.5,
+    highSpeedGripLossStart: 108 / 3.6,
+    highSpeedGripLossEnd: 172 / 3.6,
+    highSpeedGripScale: 0.68,
+    boostTorqueMultiplier: 0.34,
+    boostForce: 2500,
+    boostGripLoad: 0.08,
     accelerationResponse: 20,
     longitudinalForceResponse: 34,
     driveInputRamp: 8.8,
@@ -260,6 +267,13 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     brakeDriftRearBrakeScale: 1.1,
     brakeDriftRearLateralScale: 0.78,
     brakeDriftYawAssist: 0.26,
+    handbrakeTorqueScale: 0.42,
+    highSpeedGripLossStart: 168 / 3.6,
+    highSpeedGripLossEnd: 232 / 3.6,
+    highSpeedGripScale: 0.82,
+    boostTorqueMultiplier: 0.46,
+    boostForce: 4300,
+    boostGripLoad: 0.12,
     accelerationResponse: 18,
     longitudinalForceResponse: 30,
     driveInputRamp: 5.9,
@@ -335,6 +349,13 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     brakeDriftRearBrakeScale: 1.14,
     brakeDriftRearLateralScale: 0.72,
     brakeDriftYawAssist: 0.34,
+    handbrakeTorqueScale: 0.46,
+    highSpeedGripLossStart: 138 / 3.6,
+    highSpeedGripLossEnd: 204 / 3.6,
+    highSpeedGripScale: 0.74,
+    boostTorqueMultiplier: 0.4,
+    boostForce: 3400,
+    boostGripLoad: 0.1,
     accelerationResponse: 15,
     longitudinalForceResponse: 24,
     driveInputRamp: 4.5,
@@ -476,6 +497,8 @@ export class VehiclePhysics {
       throttle: 0,
       brake: 0,
       handbrake: false,
+      boost: false,
+      boostPower: 0,
     };
     this.forward = LOCAL_FORWARD.clone();
     this.right = LOCAL_RIGHT.clone();
@@ -540,6 +563,8 @@ export class VehiclePhysics {
     this.input.throttle = clamp(input.throttle ?? 0, 0, 1);
     this.input.brake = clamp(input.brake ?? 0, 0, 1);
     this.input.handbrake = Boolean(input.handbrake);
+    this.input.boost = Boolean(input.boost);
+    this.input.boostPower = this.input.boost ? clamp(input.boostPower ?? 0, 0, 1) : 0;
     this.rawSteer = this.input.steer;
   }
 
@@ -551,7 +576,8 @@ export class VehiclePhysics {
       Math.abs(this.input.steer) > 0.01 ||
       this.input.throttle > 0.01 ||
       this.input.brake > 0.01 ||
-      this.input.handbrake
+      this.input.handbrake ||
+      this.input.boost
     ) {
       this.chassisBody.wakeUp();
     }
@@ -778,6 +804,7 @@ export class VehiclePhysics {
         wheel.normalLoad + transferLoad * transferInfluence + this.getWheelAeroGripLoad(wheel),
       );
       const surfaceGrip = this.getSurfaceGrip(wheel.contactPointWorld.x, wheel.contactPointWorld.z);
+      const highSpeedGripScale = this.getHighSpeedGripScale();
       const axleGripScale = wheel.isFront ? this.config.frontTireGripScale ?? 1 : this.config.rearTireGripScale ?? 1;
       const axleLongitudinalScale = wheel.isFront
         ? this.config.frontLongitudinalGripScale ?? axleGripScale
@@ -790,14 +817,20 @@ export class VehiclePhysics {
         ? 1
         : lerp(1, this.config.brakeDriftRearLateralScale ?? 0.78, brakeDriftFactor);
       const availableLongitudinal =
-        effectiveLoad * this.config.tireGrip * this.config.longitudinalGrip * axleLongitudinalScale * surfaceGrip;
+        effectiveLoad *
+        this.config.tireGrip *
+        this.config.longitudinalGrip *
+        axleLongitudinalScale *
+        surfaceGrip *
+        highSpeedGripScale;
       const availableLateral =
         effectiveLoad *
         this.config.tireGrip *
         this.config.lateralGrip *
         axleLateralScale *
         brakeDriftLateralScale *
-        surfaceGrip;
+        surfaceGrip *
+        highSpeedGripScale;
 
       // Slip is converted through a grip curve, not a fixed friction clamp.
       // Near zero slip the slope is steep, so the car feels planted. Past the
@@ -887,11 +920,14 @@ export class VehiclePhysics {
     const ratio = getGearRatio(this.config, this.gear) * this.config.finalDrive;
     const torqueFromCurve = sampleTorqueCurve(this.config.engineTorqueCurve, this.rpm);
     const speedFade = 1 - smoothstep(this.config.maxForwardSpeed * 0.92, this.config.maxForwardSpeed * 1.08, Math.abs(this.signedSpeed)) * 0.72;
+    const boostPower = this.getBoostPower();
+    const boostTorqueMultiplier = 1 + boostPower * (this.config.boostTorqueMultiplier ?? 0);
     const drivenCount = Math.max(this.drivenWheelIndices.length, 1);
     const maxTorquePerWheel = (this.config.engineForce * this.config.tireRadius) / drivenCount;
 
     this.driveInput = approach(this.driveInput, targetDriveInput, ramp * dt);
     this.throttle = engineThrottle;
+    this.applyBoostForce(boostPower);
 
     for (const wheel of this.wheels) {
       wheel.engineTorque = 0;
@@ -905,7 +941,8 @@ export class VehiclePhysics {
       this.config.drivetrainEfficiency *
       this.clutch *
       Math.abs(this.driveInput) *
-      speedFade;
+      speedFade *
+      boostTorqueMultiplier;
     const signedTorque = Math.sign(this.driveInput) * Math.abs(totalWheelTorque);
     const perWheelTorque = clamp(signedTorque / drivenCount, -maxTorquePerWheel, maxTorquePerWheel);
 
@@ -950,7 +987,10 @@ export class VehiclePhysics {
       let brakeTorque = this.config.brakeForce * this.config.tireRadius * this.brakePressure * axleShare * 0.5 * corneringBrakeScale;
 
       if (this.input.handbrake && !wheel.isFront) {
-        brakeTorque = Math.max(brakeTorque, this.config.brakeForce * this.config.tireRadius * 0.36);
+        brakeTorque = Math.max(
+          brakeTorque,
+          this.config.brakeForce * this.config.tireRadius * (this.config.handbrakeTorqueScale ?? 0.36),
+        );
       }
 
       if (this.config.abs && brakeTorque > 0 && Math.abs(wheel.forwardSpeed) > 5 && wheel.slipRatio < -this.config.absSlip) {
@@ -976,10 +1016,13 @@ export class VehiclePhysics {
   }
 
   getRearBrakeStabilityScale(wheel) {
-    if (wheel.isFront || this.brakePressure <= 0.01 || this.input.handbrake) return 1;
+    if (wheel.isFront || (this.brakePressure <= 0.01 && !this.input.handbrake)) return 1;
 
     const speedDemand = smoothstep(6, 28, Math.abs(wheel.forwardSpeed || this.signedSpeed));
-    const brakeDemand = smoothstep(0.12, 0.9, this.brakePressure);
+    const brakeDemand = Math.max(
+      smoothstep(0.12, 0.9, this.brakePressure),
+      this.input.handbrake && this.config.brakeDrift ? 0.82 : 0,
+    );
     const lateralDemand = clamp(
       Math.abs(wheel.slipAngle) / 0.28 + Math.abs(wheel.lateralSpeed) / 18,
       0,
@@ -1011,10 +1054,13 @@ export class VehiclePhysics {
   }
 
   getBrakingCorneringReserve(wheel) {
-    if (this.brakePressure <= 0.03 || !wheel.isInContact) return 0;
+    if ((this.brakePressure <= 0.03 && !this.input.handbrake) || !wheel.isInContact) return 0;
 
     const lateralDemand = clamp(Math.abs(wheel.slipAngle) / 0.34, 0, 1);
-    const brakeDemand = smoothstep(0.08, 0.85, this.brakePressure);
+    const brakeDemand = Math.max(
+      smoothstep(0.08, 0.85, this.brakePressure),
+      this.input.handbrake && this.config.brakeDrift && !wheel.isFront ? 0.74 : 0,
+    );
     const speedDemand = smoothstep(5, 24, Math.abs(wheel.forwardSpeed || this.signedSpeed));
     const reserveDemand = Math.max(lateralDemand, (wheel.isFront ? 0.1 : 0.22) * speedDemand);
     const reserve = wheel.isFront
@@ -1027,9 +1073,12 @@ export class VehiclePhysics {
   }
 
   getBrakeDriftFactor(wheel) {
-    if (!this.config.brakeDrift || wheel.isFront || this.input.handbrake) return 0;
+    if (!this.config.brakeDrift || wheel.isFront) return 0;
 
-    const brakeDemand = smoothstep(0.12, 0.86, this.brakePressure);
+    const brakeDemand = Math.max(
+      smoothstep(0.12, 0.86, this.brakePressure),
+      this.input.handbrake ? 0.92 : 0,
+    );
     const speedDemand = smoothstep(7, 28, Math.abs(wheel.forwardSpeed || this.signedSpeed));
     const steerDemand = smoothstep(
       0.04,
@@ -1051,7 +1100,10 @@ export class VehiclePhysics {
       smoothstep(5, 28, Math.abs(this.signedSpeed));
     if (slipFactor <= 0.001) return;
 
-    const brakeBlend = smoothstep(0.05, 0.85, this.brakePressure);
+    const brakeBlend = Math.max(
+      smoothstep(0.05, 0.85, this.brakePressure),
+      this.input.handbrake && this.config.brakeDrift ? 0.86 : 0,
+    );
     const stabilityGain = this.config.brakeDrift
       ? lerp(1, this.config.brakeSlideStability ?? 0.55, brakeBlend)
       : 1 + brakeBlend * (this.config.brakeSlideStability ?? 0.65);
@@ -1121,7 +1173,36 @@ export class VehiclePhysics {
     const frontShare = clamp(this.config.frontDownforceShare ?? 0.5, 0.25, 0.75);
     const axleShare = wheel.isFront ? frontShare : 1 - frontShare;
     const efficiency = this.config.aeroGripEfficiency ?? 0.85;
-    return this.getAeroDownforce() * axleShare * 0.5 * efficiency;
+    const boostGripLoad = this.config.mass * this.gravity * (this.config.boostGripLoad ?? 0) * this.getBoostPower();
+    return (this.getAeroDownforce() + boostGripLoad) * axleShare * 0.5 * efficiency;
+  }
+
+  getHighSpeedGripScale() {
+    const minimumGrip = this.config.highSpeedGripScale ?? 1;
+    if (minimumGrip >= 0.999) return 1;
+
+    const start = this.config.highSpeedGripLossStart ?? this.config.maxForwardSpeed * 0.72;
+    const end = this.config.highSpeedGripLossEnd ?? this.config.maxForwardSpeed;
+    return lerp(1, minimumGrip, smoothstep(start, end, Math.abs(this.signedSpeed)));
+  }
+
+  getBoostPower() {
+    if (!this.input.boost || this.input.boostPower <= 0 || this.gear < 0) return 0;
+
+    const speedFade = 1 - smoothstep(
+      this.config.maxForwardSpeed * 1.02,
+      this.config.maxForwardSpeed * 1.22,
+      Math.abs(this.signedSpeed),
+    );
+    return clamp(this.input.boostPower * speedFade, 0, 1);
+  }
+
+  applyBoostForce(boostPower = this.getBoostPower()) {
+    const boostForce = (this.config.boostForce ?? 0) * boostPower;
+    if (boostForce <= 1 || this.groundedWheels <= 0) return;
+
+    const horizontalForward = projectOnPlane(this.forward, WORLD_UP);
+    this.applyForceAtPoint(scaleVec(horizontalForward, boostForce * this.contactRatio), new CANNON.Vec3());
   }
 
   applyForceAtPoint(force, point) {

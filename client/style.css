@@ -865,6 +865,30 @@ button {
   line-height: 0.9;
 }
 
+.boost-meter {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.boost-meter i {
+  display: block;
+  width: 0%;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6df2ff, #a7ff5b);
+  box-shadow: 0 0 12px rgba(109, 242, 255, 0.42);
+  transition: width 0.08s linear, box-shadow 0.12s ease;
+}
+
+.boost-meter i.is-active {
+  box-shadow: 0 0 18px rgba(167, 255, 91, 0.68);
+}
+
+.boost-meter[hidden] {
+  display: none;
+}
+
 .icon-button {
   position: absolute;
   right: 18px;

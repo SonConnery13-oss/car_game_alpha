@@ -216,6 +216,10 @@
         <div class="hud-panel gear-panel">
           <span>GEAR</span>
           <strong id="gearValue">N</strong>
+          <div class="boost-meter" id="boostMeter" hidden>
+            <span>BOOST</span>
+            <i id="boostFill"></i>
+          </div>
         </div>
       </section>
 
@@ -256,11 +260,11 @@
         <span>W / Left Mouse: Accelerate</span>
         <span>S / Right Mouse: Brake</span>
         <span>A D / Mouse X: Steer</span>
-        <span>LShift: Drift</span>
+        <span>LShift: Boost</span>
         <span>Gamepad RT / LT: Throttle / Brake</span>
         <span>Gamepad Left Stick: Steer</span>
         <span>F: Mouse Control</span>
-        <span>Space / Gamepad A: Handbrake</span>
+        <span>Space / Gamepad A: Handbrake / Drift</span>
       </aside>
 
       <aside id="physicsDebug" class="physics-debug" aria-label="Physics debug" hidden></aside>

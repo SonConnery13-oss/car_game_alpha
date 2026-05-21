@@ -14,6 +14,8 @@ const lapValue = document.querySelector("#lapValue");
 const currentLapValue = document.querySelector("#currentLapValue");
 const bestLapValue = document.querySelector("#bestLapValue");
 const startButton = document.querySelector("#startButton");
+const boostMeter = document.querySelector("#boostMeter");
+const boostFill = document.querySelector("#boostFill");
 const message = document.querySelector("#message");
 const mainMenu = document.querySelector("#mainMenu");
 const developersScreen = document.querySelector("#developersScreen");
@@ -194,6 +196,8 @@ const CAR_MODELS = {
     },
   },
 };
+const DRIFT_BOOST_CAR_IDS = new Set(["ae86", "rx7fd", "rx7fc"]);
+const DRIFT_BOOST_CHARGE_MIN = 0.015;
 
 const initialCourseId = URL_PARAMS.get("track") ?? URL_PARAMS.get("course");
 let selectedCourseId = COURSE_DEFS[initialCourseId] ? initialCourseId : DEFAULT_COURSE_ID;
@@ -296,6 +300,8 @@ let tractionGrip = 1;
 let tireSlip = 0;
 let driftAmount = 0;
 let driftScore = 0;
+let driftBoostCharge = 0;
+let boostAmount = 0;
 let driftLabelSprite = null;
 const driftSmokeParticles = [];
 const wallSparkParticles = [];
@@ -2325,6 +2331,10 @@ function getActivePhysicsConfig() {
 
 function modelIdUsesNarrowTire(modelId) {
   return modelId === "ae86" || modelId === "rx7fc";
+}
+
+function isDriftBoostCar(carId = selectedCarId) {
+  return DRIFT_BOOST_CAR_IDS.has(carId);
 }
 
 function createVehicle() {
@@ -5035,6 +5045,7 @@ function selectCar(carId) {
   vehiclePhysicsConfig = getVehiclePhysicsConfig(selectedCarId);
   vehicle.configure(vehiclePhysicsConfig);
   vehiclePhysics = vehicle;
+  resetDriftBoost();
   replaceCarMesh();
   applyVehicleTuning();
   updateWheelStyle();
@@ -5388,6 +5399,7 @@ function readDrivingInput(delta = FIXED_TIME_STEP) {
   const throttlePedal = Math.max(keyboardThrottle ? 1 : 0, mouseThrottle ? 1 : 0, gamepad.throttle);
   const brakePedal = Math.max(keyboardBrakeReverse ? 1 : 0, mouseBrake ? 1 : 0, gamepad.brake);
   const handbrake = keys.has("Space") || gamepad.handbrake;
+  const boost = keys.has("ShiftLeft") && isDriftBoostCar();
   const keyboardSteerInput = (left ? -1 : 0) + (right ? 1 : 0);
   const gamepadSteerInput = Math.abs(gamepad.steer) > 0.04 ? gamepad.steer : 0;
   const steerSource = mouseControls.enabled || gamepadSteerInput ? "analog" : "keyboard";
@@ -5403,6 +5415,8 @@ function readDrivingInput(delta = FIXED_TIME_STEP) {
     throttle: throttlePedal,
     brake: brakePedal,
     handbrake,
+    boost,
+    boostPower: 0,
   };
 }
 
@@ -5433,12 +5447,56 @@ function smoothSteerInput(rawSteerInput, delta, source) {
 }
 
 function updateControls(delta) {
-  vehicle.updatePhysics(delta, readDrivingInput(delta));
+  const drivingInput = readDrivingInput(delta);
+  prepareBoostInput(drivingInput);
+  vehicle.updatePhysics(delta, drivingInput);
   syncVehicleDynamicsFromPhysics(delta);
+  updateDriftBoost(delta, drivingInput);
 
   if (chassisBody.position.y < -5) {
     resetCar();
   }
+}
+
+function prepareBoostInput(input) {
+  if (!isDriftBoostCar() || driftBoostCharge < DRIFT_BOOST_CHARGE_MIN) {
+    input.boost = false;
+    input.boostPower = 0;
+    return;
+  }
+
+  input.boost = Boolean(input.boost);
+  input.boostPower = input.boost ? THREE.MathUtils.clamp(driftBoostCharge, 0, 1) : 0;
+}
+
+function updateDriftBoost(delta, input) {
+  if (!isDriftBoostCar()) {
+    resetDriftBoost();
+    return;
+  }
+
+  const speed = Math.abs(vehicleDynamics.signedSpeed);
+  const usingBoost = Boolean(input.boost && input.boostPower > 0);
+  const isChargingDrift = driftAmount > 0.18 && vehicleDynamics.grounded && speed > 8;
+
+  if (usingBoost) {
+    const drainRate = THREE.MathUtils.lerp(0.42, 0.72, input.boostPower);
+    driftBoostCharge = Math.max(0, driftBoostCharge - drainRate * delta);
+    boostAmount = input.boostPower;
+  } else {
+    boostAmount = Math.max(0, boostAmount - delta * 4);
+  }
+
+  if (isChargingDrift && !usingBoost) {
+    const speedCharge = THREE.MathUtils.lerp(0.13, 0.32, THREE.MathUtils.clamp(speed / 34, 0, 1));
+    const handbrakeBonus = input.handbrake ? 1.25 : 1;
+    driftBoostCharge = Math.min(1, driftBoostCharge + speedCharge * driftAmount * handbrakeBonus * delta);
+  }
+}
+
+function resetDriftBoost() {
+  driftBoostCharge = 0;
+  boostAmount = 0;
 }
 
 function syncVehicleDynamicsFromPhysics(delta) {
@@ -6356,7 +6414,23 @@ function updateHud() {
   currentLapValue.textContent = formatTime(elapsed);
   bestLapValue.textContent = bestLap === null ? "--.---" : formatTime(bestLap);
   gearValue.textContent = estimateGear(kmh);
+  updateBoostMeter();
   updatePhysicsDebug(kmh);
+}
+
+function updateBoostMeter() {
+  if (!boostMeter || !boostFill) return;
+
+  const hasBoostSystem = isDriftBoostCar();
+  boostMeter.hidden = !hasBoostSystem;
+  if (!hasBoostSystem) {
+    boostFill.style.width = "0%";
+    boostFill.classList.remove("is-active");
+    return;
+  }
+
+  boostFill.style.width = `${Math.round(driftBoostCharge * 100)}%`;
+  boostFill.classList.toggle("is-active", boostAmount > 0.02);
 }
 
 function updatePhysicsDebug(kmh) {
@@ -6401,6 +6475,7 @@ function updatePhysicsDebug(kmh) {
       <span>lat accel</span><span>${vehiclePhysics.lateralAcceleration.toFixed(2)} m/s2</span>
       <span>front/rear grip</span><span>${vehiclePhysics.frontGripUsage.toFixed(2)} / ${vehiclePhysics.rearGripUsage.toFixed(2)}</span>
       <span>drag</span><span>${Math.round(vehiclePhysics.aeroDrag)} N</span>
+      <span>boost</span><span>${isDriftBoostCar() ? `${Math.round(driftBoostCharge * 100)}%${boostAmount > 0.02 ? " ON" : ""}` : "n/a"}</span>
     </div>
     <div class="debug-wheels">${wheelRows}</div>
   `;
@@ -6475,6 +6550,7 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   tireSlip = 0;
   driftAmount = 0;
   driftScore = 0;
+  resetDriftBoost();
   if (driftLabelSprite) {
     driftLabelSprite.material.opacity = 0;
     driftLabelSprite.visible = false;
