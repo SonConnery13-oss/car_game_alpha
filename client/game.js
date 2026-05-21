@@ -198,6 +198,8 @@ const CAR_MODELS = {
 };
 const DRIFT_BOOST_CAR_IDS = new Set(["ae86", "rx7fd", "rx7fc"]);
 const DRIFT_BOOST_CHARGE_MIN = 0.015;
+const DRIFT_BOOST_DRAIN_MIN = 0.055;
+const DRIFT_BOOST_DRAIN_MAX = 0.095;
 
 const initialCourseId = URL_PARAMS.get("track") ?? URL_PARAMS.get("course");
 let selectedCourseId = COURSE_DEFS[initialCourseId] ? initialCourseId : DEFAULT_COURSE_ID;
@@ -5480,7 +5482,7 @@ function updateDriftBoost(delta, input) {
   const isChargingDrift = driftAmount > 0.18 && vehicleDynamics.grounded && speed > 8;
 
   if (usingBoost) {
-    const drainRate = THREE.MathUtils.lerp(0.42, 0.72, input.boostPower);
+    const drainRate = THREE.MathUtils.lerp(DRIFT_BOOST_DRAIN_MIN, DRIFT_BOOST_DRAIN_MAX, input.boostPower);
     driftBoostCharge = Math.max(0, driftBoostCharge - drainRate * delta);
     boostAmount = input.boostPower;
   } else {
