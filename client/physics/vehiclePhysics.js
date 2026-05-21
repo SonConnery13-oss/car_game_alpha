@@ -177,10 +177,14 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     rearBrakeCorneringTorqueScale: 0.34,
     rearBrakeStabilityScale: 0.44,
     brakeLateralReserve: 0.9,
-    rearBrakeLateralReserve: 0.86,
-    slideLateralDamping: 0.64,
-    slideYawDamping: 0.96,
-    brakeSlideStability: 0.82,
+    rearBrakeLateralReserve: 0.62,
+    slideLateralDamping: 0.6,
+    slideYawDamping: 0.86,
+    brakeSlideStability: 0.38,
+    brakeDrift: true,
+    brakeDriftRearBrakeScale: 1.18,
+    brakeDriftRearLateralScale: 0.64,
+    brakeDriftYawAssist: 0.42,
     accelerationResponse: 20,
     longitudinalForceResponse: 34,
     driveInputRamp: 8.8,
@@ -248,10 +252,14 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     rearBrakeCorneringTorqueScale: 0.26,
     rearBrakeStabilityScale: 0.3,
     brakeLateralReserve: 0.96,
-    rearBrakeLateralReserve: 0.95,
-    slideLateralDamping: 0.88,
-    slideYawDamping: 1.42,
-    brakeSlideStability: 1.16,
+    rearBrakeLateralReserve: 0.74,
+    slideLateralDamping: 0.82,
+    slideYawDamping: 1.22,
+    brakeSlideStability: 0.58,
+    brakeDrift: true,
+    brakeDriftRearBrakeScale: 1.1,
+    brakeDriftRearLateralScale: 0.78,
+    brakeDriftYawAssist: 0.26,
     accelerationResponse: 18,
     longitudinalForceResponse: 30,
     driveInputRamp: 5.9,
@@ -319,10 +327,14 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     rearBrakeCorneringTorqueScale: 0.3,
     rearBrakeStabilityScale: 0.38,
     brakeLateralReserve: 0.93,
-    rearBrakeLateralReserve: 0.9,
-    slideLateralDamping: 0.78,
-    slideYawDamping: 1.22,
-    brakeSlideStability: 1.02,
+    rearBrakeLateralReserve: 0.68,
+    slideLateralDamping: 0.72,
+    slideYawDamping: 1.06,
+    brakeSlideStability: 0.48,
+    brakeDrift: true,
+    brakeDriftRearBrakeScale: 1.14,
+    brakeDriftRearLateralScale: 0.72,
+    brakeDriftYawAssist: 0.34,
     accelerationResponse: 15,
     longitudinalForceResponse: 24,
     driveInputRamp: 4.5,
@@ -773,10 +785,19 @@ export class VehiclePhysics {
       const axleLateralScale = wheel.isFront
         ? this.config.frontLateralGripScale ?? axleGripScale
         : this.config.rearLateralGripScale ?? axleGripScale;
+      const brakeDriftFactor = this.getBrakeDriftFactor(wheel);
+      const brakeDriftLateralScale = wheel.isFront
+        ? 1
+        : lerp(1, this.config.brakeDriftRearLateralScale ?? 0.78, brakeDriftFactor);
       const availableLongitudinal =
         effectiveLoad * this.config.tireGrip * this.config.longitudinalGrip * axleLongitudinalScale * surfaceGrip;
       const availableLateral =
-        effectiveLoad * this.config.tireGrip * this.config.lateralGrip * axleLateralScale * surfaceGrip;
+        effectiveLoad *
+        this.config.tireGrip *
+        this.config.lateralGrip *
+        axleLateralScale *
+        brakeDriftLateralScale *
+        surfaceGrip;
 
       // Slip is converted through a grip curve, not a fixed friction clamp.
       // Near zero slip the slope is steep, so the car feels planted. Past the
@@ -967,6 +988,10 @@ export class VehiclePhysics {
     const lockDemand = smoothstep(0.18, this.config.absSlip ?? 0.72, -wheel.slipRatio);
     const stabilityDemand = Math.max(lateralDemand, lockDemand * 0.85) * speedDemand * brakeDemand;
 
+    if (this.config.brakeDrift) {
+      return lerp(1, this.config.brakeDriftRearBrakeScale ?? 1.08, stabilityDemand);
+    }
+
     return lerp(1, this.config.rearBrakeStabilityScale ?? 0.5, stabilityDemand);
   }
 
@@ -1001,6 +1026,21 @@ export class VehiclePhysics {
     return clamp(reserve * reserveDemand * brakeDemand, 0, 0.98);
   }
 
+  getBrakeDriftFactor(wheel) {
+    if (!this.config.brakeDrift || wheel.isFront || this.input.handbrake) return 0;
+
+    const brakeDemand = smoothstep(0.12, 0.86, this.brakePressure);
+    const speedDemand = smoothstep(7, 28, Math.abs(wheel.forwardSpeed || this.signedSpeed));
+    const steerDemand = smoothstep(
+      0.04,
+      Math.max(this.config.maxSteerAngle ?? 0.5, 0.1),
+      Math.abs(this.steeringAngle),
+    );
+    const lateralDemand = smoothstep(0.8, 7.5, Math.abs(wheel.lateralSpeed));
+
+    return clamp(brakeDemand * speedDemand * lerp(0.34, 1, Math.max(steerDemand, lateralDemand)), 0, 1);
+  }
+
   applySlideStability(dt) {
     if (this.groundedWheels <= 0) return;
 
@@ -1012,7 +1052,9 @@ export class VehiclePhysics {
     if (slipFactor <= 0.001) return;
 
     const brakeBlend = smoothstep(0.05, 0.85, this.brakePressure);
-    const stabilityGain = 1 + brakeBlend * (this.config.brakeSlideStability ?? 0.65);
+    const stabilityGain = this.config.brakeDrift
+      ? lerp(1, this.config.brakeSlideStability ?? 0.55, brakeBlend)
+      : 1 + brakeBlend * (this.config.brakeSlideStability ?? 0.65);
     const lateralDamping = (this.config.slideLateralDamping ?? 0.7) * stabilityGain;
     const lateralForce = -lateralSpeed * this.config.mass * lateralDamping * slipFactor * this.contactRatio;
 
@@ -1022,6 +1064,13 @@ export class VehiclePhysics {
 
     const yawDamping = (this.config.slideYawDamping ?? 1.2) * stabilityGain * slipFactor * this.contactRatio;
     this.chassisBody.angularVelocity.y *= Math.exp(-yawDamping * dt);
+
+    if (this.config.brakeDrift && brakeBlend > 0.02 && Math.abs(this.steeringAngle) > 0.015) {
+      const speedDemand = smoothstep(7, 28, Math.abs(this.signedSpeed));
+      const steerDirection = Math.sign(this.steeringAngle);
+      this.chassisBody.angularVelocity.y +=
+        steerDirection * (this.config.brakeDriftYawAssist ?? 0.25) * brakeBlend * speedDemand * this.contactRatio * dt;
+    }
   }
 
   applyAeroAndRollingResistance() {

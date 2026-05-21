@@ -274,10 +274,10 @@ world.addContactMaterial(
 );
 world.addContactMaterial(
   new CANNON.ContactMaterial(carMaterial, barrierMaterial, {
-    friction: 0.015,
-    restitution: 0.08,
-    contactEquationStiffness: 9e5,
-    contactEquationRelaxation: 3,
+    friction: 0.002,
+    restitution: 0.04,
+    contactEquationStiffness: 7e5,
+    contactEquationRelaxation: 5,
   }),
 );
 
@@ -2870,37 +2870,45 @@ function createJdmCarMesh(modelId) {
       box(0.044, 0.42, 0.05, trimMaterial, side * 0.46, 0.66, -0.74, -0.1);
     }
   } else if (modelId === "rx7fd") {
-    ellipsoid(2.12, 0.58, 4.1, bodyMaterial, 0, 0.1, 0);
-    box(2.0, 0.26, 3.82, bodyMaterial, 0, -0.08, -0.04);
-    box(2.1, 0.18, 3.92, lowerMaterial, 0, -0.22, -0.02);
-    ellipsoid(1.5, 0.74, 1.44, glassMaterial, 0, 0.62, -0.38, -0.04);
-    box(1.28, 0.08, 1.18, bodyMaterial, 0, 0.92, -0.38, -0.03);
-    box(1.52, 0.1, 1.2, bodyMaterial, 0, 0.36, 1.05, -0.1);
-    box(2.12, 0.18, 0.24, lowerMaterial, 0, -0.13, 1.96);
-    box(0.7, 0.16, 0.07, blackMaterial, 0, -0.02, 2.08);
-    box(0.34, 0.1, 0.055, amberMaterial, -0.78, 0.04, 2.08);
-    box(0.34, 0.1, 0.055, amberMaterial, 0.78, 0.04, 2.08);
+    ellipsoid(2.1, 0.48, 4.02, bodyMaterial, 0, 0.04, 0);
+    box(2.02, 0.36, 3.78, bodyMaterial, 0, -0.04, -0.04);
+    box(2.12, 0.18, 3.92, lowerMaterial, 0, -0.23, -0.02);
+    box(1.72, 0.18, 1.46, bodyMaterial, 0, 0.28, 1.02, -0.08);
+    box(1.7, 0.18, 1.42, bodyMaterial, 0, 0.31, -1.28, 0.05);
+    ellipsoid(1.46, 0.64, 1.36, glassMaterial, 0, 0.58, -0.38, -0.04);
+    box(1.2, 0.08, 1.08, bodyMaterial, 0, 0.82, -0.38, -0.03);
+    box(1.52, 0.09, 1.16, bodyMaterial, 0, 0.34, 1.04, -0.1);
+    box(2.12, 0.18, 0.24, lowerMaterial, 0, -0.16, 1.96);
+    box(0.76, 0.15, 0.07, blackMaterial, 0, -0.02, 2.08);
+    box(0.34, 0.1, 0.055, amberMaterial, -0.78, 0.06, 2.08);
+    box(0.34, 0.1, 0.055, amberMaterial, 0.78, 0.06, 2.08);
     for (const side of [-1, 1]) {
-      ellipsoid(0.54, 0.14, 0.06, headlightMaterial, side * 0.58, 0.24, 2.02);
-      ellipsoid(0.22, 0.1, 0.05, whiteLightMaterial, side * 0.92, -0.1, 2.08);
-      box(0.24, 0.42, 0.74, bodyMaterial, side * 1.0, 0.03, 1.18);
-      box(0.22, 0.46, 0.8, bodyMaterial, side * 1.02, 0.02, -1.28);
-      box(0.18, 0.22, 0.32, blackMaterial, side * 1.05, 0.12, 0.24, 0, side * 0.18);
-      box(0.1, 0.08, 1.72, lowerMaterial, side * 1.08, -0.21, -0.12);
-      plane(1.05, 0.24, decalMaterial, side * 1.085, 0.18, -0.4, 0, side > 0 ? Math.PI / 2 : -Math.PI / 2);
+      ellipsoid(0.52, 0.12, 0.055, headlightMaterial, side * 0.58, 0.24, 2.02);
+      ellipsoid(0.22, 0.1, 0.05, whiteLightMaterial, side * 0.92, -0.03, 2.08);
+      box(0.24, 0.42, 0.74, bodyMaterial, side * 0.99, 0.0, 1.18);
+      box(0.22, 0.46, 0.8, bodyMaterial, side * 1.01, 0.0, -1.28);
+      box(0.16, 0.2, 0.34, blackMaterial, side * 1.045, 0.11, 0.24, 0, side * 0.18);
+      box(0.1, 0.1, 1.76, lowerMaterial, side * 1.07, -0.2, -0.12);
+      box(0.1, 0.14, 0.98, bodyMaterial, side * 1.055, 0.12, -0.32);
+      plane(1.05, 0.24, decalMaterial, side * 1.085, 0.2, -0.4, 0, side > 0 ? Math.PI / 2 : -Math.PI / 2);
       box(0.08, 0.14, 0.32, bodyMaterial, side * 1.18, 0.42, 0.62, 0, side * 0.2);
       box(0.1, 0.05, 0.28, lowerMaterial, side * 1.24, 0.35, 0.56, 0, side * 0.18);
+      box(0.045, 0.36, 0.06, trimMaterial, side * 0.54, 0.62, 0.04, 0.12);
+      box(0.045, 0.34, 0.05, trimMaterial, side * 0.48, 0.62, -0.74, -0.08);
     }
     box(1.9, 0.22, 0.22, bodyMaterial, 0, 0.1, -1.9);
+    box(1.7, 0.08, 0.5, bodyMaterial, 0, 0.34, -1.58, 0.06);
     for (const side of [-1, 1]) {
       ellipsoid(0.36, 0.16, 0.055, redLightMaterial, side * 0.5, 0.24, -2.02);
       ellipsoid(0.22, 0.12, 0.055, redLightMaterial, side * 0.82, 0.21, -2.02);
       box(0.36, 0.06, 0.055, amberMaterial, side * 0.5, 0.08, -2.03);
     }
     plane(0.68, 0.22, plateMaterial, 0, 0.02, -2.08, 0, Math.PI);
-    box(1.68, 0.08, 0.22, bodyMaterial, 0, 0.92, -1.92, -0.06);
-    box(0.09, 0.32, 0.42, bodyMaterial, -0.86, 0.76, -1.92, -0.02);
-    box(0.09, 0.32, 0.42, bodyMaterial, 0.86, 0.76, -1.92, -0.02);
+    box(1.66, 0.08, 0.22, bodyMaterial, 0, 0.78, -1.9, -0.06);
+    box(0.09, 0.28, 0.38, bodyMaterial, -0.82, 0.62, -1.9, -0.02);
+    box(0.09, 0.28, 0.38, bodyMaterial, 0.82, 0.62, -1.9, -0.02);
+    box(0.74, 0.055, 0.12, bodyMaterial, -0.42, 0.5, -1.84, -0.04);
+    box(0.74, 0.055, 0.12, bodyMaterial, 0.42, 0.5, -1.84, -0.04);
     addExhaustPair(0.68, -2.18, 1);
     addPanelLines(1.96, 1.35, -1.45, 0.22);
   } else {
@@ -5711,11 +5719,15 @@ function handleChassisCollision(event) {
   const tangentSpeed = Math.sqrt(Math.max(0, speed * speed - normalSpeed * normalSpeed));
 
   if (normalSpeed < -0.1) {
-    const slideCorrection = -normalSpeed * 0.82;
+    const slideCorrection = -normalSpeed * 1.06 + 0.22;
     chassisBody.velocity.x += normal.x * slideCorrection;
     chassisBody.velocity.y += normal.y * slideCorrection;
     chassisBody.velocity.z += normal.z * slideCorrection;
   }
+
+  chassisBody.angularVelocity.x *= 0.92;
+  chassisBody.angularVelocity.y *= 0.84;
+  chassisBody.angularVelocity.z *= 0.92;
 
   const impact = Math.max(0, -normalSpeed) + tangentSpeed * 0.28;
   const now = performance.now();
