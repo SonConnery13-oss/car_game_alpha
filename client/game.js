@@ -142,6 +142,7 @@ const CAR_MODELS = {
     name: "GT3 RS Prototype",
     previewClass: "garage-preview-gt3",
     rimColor: 0xc52d22,
+    brakeColor: 0xf5bf29,
     tuning: {
       maxForwardSpeed: 200 / 3.6,
       visualStiffnessScale: 1,
@@ -152,10 +153,44 @@ const CAR_MODELS = {
     name: "AMG GT Track",
     previewClass: "garage-preview-amg",
     rimColor: 0x3c403d,
+    brakeColor: 0x202427,
     tuning: {
       maxForwardSpeed: 210 / 3.6,
       visualStiffnessScale: 0.92,
       visualDampingScale: 0.9,
+    },
+  },
+  ae86: {
+    name: "AE86 H2 Trueno",
+    previewClass: "garage-preview-ae86",
+    rimColor: 0x16181a,
+    brakeColor: 0xc52d22,
+    tuning: {
+      maxForwardSpeed: 172 / 3.6,
+      visualStiffnessScale: 0.84,
+      visualDampingScale: 0.82,
+    },
+  },
+  rx7fd: {
+    name: "RX-7 FD Spirit",
+    previewClass: "garage-preview-rx7fd",
+    rimColor: 0xd6d8d4,
+    brakeColor: 0xd03b26,
+    tuning: {
+      maxForwardSpeed: 232 / 3.6,
+      visualStiffnessScale: 0.96,
+      visualDampingScale: 0.94,
+    },
+  },
+  rx7fc: {
+    name: "RX-7 FC Turbo",
+    previewClass: "garage-preview-rx7fc",
+    rimColor: 0x24272a,
+    brakeColor: 0x202427,
+    tuning: {
+      maxForwardSpeed: 204 / 3.6,
+      visualStiffnessScale: 0.9,
+      visualDampingScale: 0.86,
     },
   },
 };
@@ -2288,6 +2323,10 @@ function getActivePhysicsConfig() {
   return vehiclePhysicsConfig;
 }
 
+function modelIdUsesNarrowTire(modelId) {
+  return modelId === "ae86" || modelId === "rx7fc";
+}
+
 function createVehicle() {
   const physics = getActivePhysicsConfig();
   const chassisShape = new CANNON.Box(new CANNON.Vec3(1.05, 0.34, 2.05));
@@ -2341,13 +2380,15 @@ function createVehicle() {
 
   for (let i = 0; i < vehicle.wheelInfos.length; i += 1) {
     const wheel = new THREE.Group();
-    const tireGeometry = new THREE.CylinderGeometry(0.43, 0.43, 0.34, 24);
+    const tireRadius = physics.tireRadius ?? 0.42;
+    const tireWidth = modelIdUsesNarrowTire(selectedCarId) ? 0.3 : 0.34;
+    const tireGeometry = new THREE.CylinderGeometry(tireRadius, tireRadius, tireWidth, 24);
     tireGeometry.rotateZ(Math.PI / 2);
-    const rimGeometry = new THREE.CylinderGeometry(0.31, 0.31, 0.36, 28);
+    const rimGeometry = new THREE.CylinderGeometry(tireRadius * 0.72, tireRadius * 0.72, tireWidth + 0.02, 28);
     rimGeometry.rotateZ(Math.PI / 2);
-    const brakeGeometry = new THREE.CylinderGeometry(0.22, 0.22, 0.05, 24);
+    const brakeGeometry = new THREE.CylinderGeometry(tireRadius * 0.52, tireRadius * 0.52, 0.05, 24);
     brakeGeometry.rotateZ(Math.PI / 2);
-    const hubGeometry = new THREE.CylinderGeometry(0.12, 0.12, 0.39, 16);
+    const hubGeometry = new THREE.CylinderGeometry(tireRadius * 0.28, tireRadius * 0.28, tireWidth + 0.05, 16);
     hubGeometry.rotateZ(Math.PI / 2);
 
     const tire = new THREE.Mesh(tireGeometry, wheelMaterial);
@@ -2392,6 +2433,10 @@ function createVehicle() {
 function createCarMesh(modelId = selectedCarId) {
   if (modelId === "amg") {
     return createAmgCarMesh();
+  }
+
+  if (modelId === "ae86" || modelId === "rx7fd" || modelId === "rx7fc") {
+    return createJdmCarMesh(modelId);
   }
 
   const group = new THREE.Group();
@@ -2621,6 +2666,319 @@ function createCarMesh(modelId = selectedCarId) {
   tunedMassRailB.position.x = 0.25;
 
   visualRoot.add(tunedMassBlock, tunedMassRailA, tunedMassRailB);
+  group.add(visualRoot);
+  return group;
+}
+
+function createJdmCarMesh(modelId) {
+  const group = new THREE.Group();
+  const visualRoot = new THREE.Group();
+  visualRoot.name = "carVisualRoot";
+
+  const designs = {
+    ae86: {
+      body: 0xf0f1ec,
+      lower: 0x111416,
+      accent: 0x2c68d8,
+      glass: 0x4d6664,
+      plate: "AE86 H2",
+      decal: "H2",
+    },
+    rx7fd: {
+      body: 0xffd500,
+      lower: 0x151515,
+      accent: 0xd52b1e,
+      glass: 0x17232a,
+      plate: "RX7 FD",
+      decal: "13B FD",
+    },
+    rx7fc: {
+      body: 0xf0f1ee,
+      lower: 0x101214,
+      accent: 0x22262a,
+      glass: 0x202a30,
+      plate: "RX7 FC",
+      decal: "TURBO II",
+    },
+  };
+  const design = designs[modelId] ?? designs.ae86;
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: design.body,
+    roughness: modelId === "rx7fd" ? 0.22 : 0.31,
+    metalness: modelId === "rx7fd" ? 0.42 : 0.28,
+  });
+  const lowerMaterial = new THREE.MeshStandardMaterial({
+    color: design.lower,
+    roughness: 0.58,
+    metalness: 0.16,
+  });
+  const accentMaterial = new THREE.MeshStandardMaterial({
+    color: design.accent,
+    roughness: 0.32,
+    metalness: 0.28,
+  });
+  const blackMaterial = new THREE.MeshStandardMaterial({
+    color: 0x080a0b,
+    roughness: 0.62,
+    metalness: 0.12,
+  });
+  const trimMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1c2023,
+    roughness: 0.42,
+    metalness: 0.42,
+  });
+  const chromeMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc7c9c3,
+    roughness: 0.2,
+    metalness: 0.76,
+  });
+  const glassMaterial = new THREE.MeshPhysicalMaterial({
+    color: design.glass,
+    roughness: 0.05,
+    metalness: 0.05,
+    transmission: 0.12,
+    transparent: true,
+    opacity: 0.58,
+  });
+  const headlightMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xeaf7ff,
+    roughness: 0.03,
+    metalness: 0.06,
+    transmission: 0.28,
+    transparent: true,
+    opacity: 0.86,
+    side: THREE.DoubleSide,
+  });
+  const amberMaterial = new THREE.MeshBasicMaterial({
+    color: 0xf2a23b,
+    transparent: true,
+    opacity: 0.88,
+    side: THREE.DoubleSide,
+  });
+  const redLightMaterial = new THREE.MeshBasicMaterial({
+    color: 0xd51f24,
+    transparent: true,
+    opacity: 0.86,
+    side: THREE.DoubleSide,
+  });
+  const whiteLightMaterial = new THREE.MeshBasicMaterial({
+    color: 0xf4f1df,
+    transparent: true,
+    opacity: 0.82,
+    side: THREE.DoubleSide,
+  });
+  const decalMaterial = new THREE.MeshBasicMaterial({
+    map: makeJdmSideDecalTexture(design.decal, design.accent, modelId),
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+  const plateMaterial = new THREE.MeshBasicMaterial({
+    map: makeLicensePlateTexture(design.plate),
+    side: THREE.DoubleSide,
+  });
+
+  function box(width, height, depth, material, x, y, z, rx = 0, ry = 0, rz = 0, name = "") {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    mesh.receiveShadow = material !== glassMaterial;
+    if (name) mesh.name = name;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function plane(width, height, material, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.renderOrder = 10;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function cylinder(radius, height, material, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 18), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function ellipsoid(width, height, depth, material, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), material);
+    mesh.scale.set(width / 2, height / 2, depth / 2);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    mesh.receiveShadow = material !== glassMaterial;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function addPanelLines(width, zFront, zRear, y = 0.25) {
+    box(0.026, 0.03, zFront - zRear, trimMaterial, -width / 2 - 0.01, y, (zFront + zRear) / 2);
+    box(0.026, 0.03, zFront - zRear, trimMaterial, width / 2 + 0.01, y, (zFront + zRear) / 2);
+    for (const side of [-1, 1]) {
+      box(0.036, 0.19, 0.04, trimMaterial, side * (width / 2 + 0.025), y + 0.1, 0.15);
+      box(0.22, 0.035, 0.05, trimMaterial, side * (width / 2 + 0.045), y + 0.09, -0.42);
+    }
+  }
+
+  function addExhaustPair(x, z, count = 1) {
+    for (let i = 0; i < count; i += 1) {
+      const offset = (i - (count - 1) / 2) * 0.18;
+      cylinder(0.055, 0.36, chromeMaterial, x + offset, -0.24, z, Math.PI / 2);
+      cylinder(0.038, 0.375, blackMaterial, x + offset, -0.24, z + 0.008, Math.PI / 2);
+    }
+  }
+
+  if (modelId === "ae86") {
+    box(2.0, 0.34, 3.72, bodyMaterial, 0, 0.02, -0.04);
+    box(2.04, 0.22, 3.72, lowerMaterial, 0, -0.13, -0.04);
+    box(1.78, 0.16, 1.28, bodyMaterial, 0, 0.29, 1.03, -0.08);
+    box(1.7, 0.18, 1.12, bodyMaterial, 0, 0.34, -1.34, 0.06);
+    box(1.38, 0.56, 1.16, glassMaterial, 0, 0.68, -0.38, -0.13);
+    box(1.2, 0.09, 1.3, bodyMaterial, 0, 0.9, -0.52, -0.08);
+    box(1.28, 0.34, 0.07, glassMaterial, 0, 0.58, -1.1, -0.46);
+    box(1.88, 0.15, 0.28, lowerMaterial, 0, -0.08, 1.94);
+    box(1.58, 0.12, 0.12, blackMaterial, 0, 0.13, 1.96);
+    box(0.58, 0.12, 0.06, whiteLightMaterial, -0.48, 0.21, 2.03);
+    box(0.58, 0.12, 0.06, whiteLightMaterial, 0.48, 0.21, 2.03);
+    box(0.28, 0.09, 0.055, amberMaterial, -0.86, 0.13, 2.04);
+    box(0.28, 0.09, 0.055, amberMaterial, 0.86, 0.13, 2.04);
+    box(1.88, 0.08, 0.08, lowerMaterial, 0, 0.16, -1.96);
+    box(1.72, 0.18, 0.18, bodyMaterial, 0, 0.13, -1.88);
+    box(0.58, 0.11, 0.05, redLightMaterial, -0.48, 0.2, -2.0);
+    box(0.58, 0.11, 0.05, redLightMaterial, 0.48, 0.2, -2.0);
+    plane(0.7, 0.22, plateMaterial, 0, 0.04, -2.055, 0, Math.PI);
+    addExhaustPair(0.56, -2.12, 1);
+    addPanelLines(1.98, 1.45, -1.48, 0.2);
+
+    for (const side of [-1, 1]) {
+      box(0.22, 0.38, 0.74, bodyMaterial, side * 1.01, 0.08, 1.22);
+      box(0.22, 0.42, 0.82, bodyMaterial, side * 1.01, 0.07, -1.22);
+      box(0.15, 0.48, 0.74, lowerMaterial, side * 1.11, -0.05, 1.2);
+      box(0.15, 0.5, 0.82, lowerMaterial, side * 1.11, -0.06, -1.23);
+      box(0.11, 0.06, 2.78, lowerMaterial, side * 1.04, 0.03, -0.1);
+      plane(1.2, 0.34, decalMaterial, side * 1.075, 0.08, -0.42, 0, side > 0 ? Math.PI / 2 : -Math.PI / 2);
+      box(0.07, 0.14, 0.3, lowerMaterial, side * 1.18, 0.42, 0.58, 0, side * 0.18);
+      box(0.12, 0.06, 0.26, blackMaterial, side * 1.25, 0.35, 0.52, 0, side * 0.2);
+      box(0.045, 0.46, 0.06, trimMaterial, side * 0.52, 0.68, 0.05, 0.08);
+      box(0.044, 0.42, 0.05, trimMaterial, side * 0.46, 0.66, -0.74, -0.1);
+    }
+  } else if (modelId === "rx7fd") {
+    ellipsoid(2.12, 0.58, 4.1, bodyMaterial, 0, 0.1, 0);
+    box(2.0, 0.26, 3.82, bodyMaterial, 0, -0.08, -0.04);
+    box(2.1, 0.18, 3.92, lowerMaterial, 0, -0.22, -0.02);
+    ellipsoid(1.5, 0.74, 1.44, glassMaterial, 0, 0.62, -0.38, -0.04);
+    box(1.28, 0.08, 1.18, bodyMaterial, 0, 0.92, -0.38, -0.03);
+    box(1.52, 0.1, 1.2, bodyMaterial, 0, 0.36, 1.05, -0.1);
+    box(2.12, 0.18, 0.24, lowerMaterial, 0, -0.13, 1.96);
+    box(0.7, 0.16, 0.07, blackMaterial, 0, -0.02, 2.08);
+    box(0.34, 0.1, 0.055, amberMaterial, -0.78, 0.04, 2.08);
+    box(0.34, 0.1, 0.055, amberMaterial, 0.78, 0.04, 2.08);
+    for (const side of [-1, 1]) {
+      ellipsoid(0.54, 0.14, 0.06, headlightMaterial, side * 0.58, 0.24, 2.02);
+      ellipsoid(0.22, 0.1, 0.05, whiteLightMaterial, side * 0.92, -0.1, 2.08);
+      box(0.24, 0.42, 0.74, bodyMaterial, side * 1.0, 0.03, 1.18);
+      box(0.22, 0.46, 0.8, bodyMaterial, side * 1.02, 0.02, -1.28);
+      box(0.18, 0.22, 0.32, blackMaterial, side * 1.05, 0.12, 0.24, 0, side * 0.18);
+      box(0.1, 0.08, 1.72, lowerMaterial, side * 1.08, -0.21, -0.12);
+      plane(1.05, 0.24, decalMaterial, side * 1.085, 0.18, -0.4, 0, side > 0 ? Math.PI / 2 : -Math.PI / 2);
+      box(0.08, 0.14, 0.32, bodyMaterial, side * 1.18, 0.42, 0.62, 0, side * 0.2);
+      box(0.1, 0.05, 0.28, lowerMaterial, side * 1.24, 0.35, 0.56, 0, side * 0.18);
+    }
+    box(1.9, 0.22, 0.22, bodyMaterial, 0, 0.1, -1.9);
+    for (const side of [-1, 1]) {
+      ellipsoid(0.36, 0.16, 0.055, redLightMaterial, side * 0.5, 0.24, -2.02);
+      ellipsoid(0.22, 0.12, 0.055, redLightMaterial, side * 0.82, 0.21, -2.02);
+      box(0.36, 0.06, 0.055, amberMaterial, side * 0.5, 0.08, -2.03);
+    }
+    plane(0.68, 0.22, plateMaterial, 0, 0.02, -2.08, 0, Math.PI);
+    box(1.68, 0.08, 0.22, bodyMaterial, 0, 0.92, -1.92, -0.06);
+    box(0.09, 0.32, 0.42, bodyMaterial, -0.86, 0.76, -1.92, -0.02);
+    box(0.09, 0.32, 0.42, bodyMaterial, 0.86, 0.76, -1.92, -0.02);
+    addExhaustPair(0.68, -2.18, 1);
+    addPanelLines(1.96, 1.35, -1.45, 0.22);
+  } else {
+    box(2.04, 0.36, 3.9, bodyMaterial, 0, 0.02, -0.03);
+    box(2.06, 0.2, 3.92, lowerMaterial, 0, -0.18, -0.03);
+    box(1.78, 0.14, 1.36, bodyMaterial, 0, 0.31, 1.04, -0.09);
+    box(1.68, 0.18, 1.28, bodyMaterial, 0, 0.34, -1.36, 0.06);
+    box(1.34, 0.58, 1.16, glassMaterial, 0, 0.66, -0.4, -0.1);
+    box(1.12, 0.09, 1.24, bodyMaterial, 0, 0.9, -0.46, -0.08);
+    box(2.1, 0.16, 0.28, lowerMaterial, 0, -0.12, 1.96);
+    box(1.1, 0.14, 0.07, blackMaterial, 0, 0.0, 2.08);
+    for (const side of [-1, 1]) {
+      box(0.38, 0.22, 0.38, bodyMaterial, side * 0.48, 0.43, 1.5, -0.1);
+      box(0.28, 0.12, 0.055, headlightMaterial, side * 0.48, 0.46, 1.72, -0.1);
+      box(0.26, 0.08, 0.055, amberMaterial, side * 0.84, 0.02, 2.08);
+      box(0.22, 0.42, 0.78, bodyMaterial, side * 1.0, 0.05, 1.22);
+      box(0.22, 0.46, 0.82, bodyMaterial, side * 1.0, 0.04, -1.24);
+      box(0.1, 0.08, 1.66, lowerMaterial, side * 1.08, -0.18, -0.08);
+      plane(0.96, 0.2, decalMaterial, side * 1.08, 0.19, -0.42, 0, side > 0 ? Math.PI / 2 : -Math.PI / 2);
+      box(0.08, 0.14, 0.28, bodyMaterial, side * 1.17, 0.42, 0.56, 0, side * 0.2);
+      box(0.045, 0.44, 0.06, trimMaterial, side * 0.5, 0.65, 0.08, 0.1);
+      box(0.045, 0.38, 0.05, trimMaterial, side * 0.45, 0.64, -0.72, -0.08);
+    }
+    box(1.84, 0.2, 0.2, bodyMaterial, 0, 0.1, -1.94);
+    box(1.78, 0.08, 0.08, trimMaterial, 0, 0.38, -1.8);
+    for (const side of [-1, 1]) {
+      box(0.52, 0.12, 0.055, redLightMaterial, side * 0.46, 0.22, -2.05);
+      box(0.24, 0.1, 0.055, whiteLightMaterial, side * 0.84, 0.18, -2.05);
+    }
+    plane(0.68, 0.22, plateMaterial, 0, 0.02, -2.08, 0, Math.PI);
+    box(1.84, 0.08, 0.2, bodyMaterial, 0, 0.9, -1.9, -0.04);
+    box(0.09, 0.35, 0.42, bodyMaterial, -0.88, 0.74, -1.88, -0.02);
+    box(0.09, 0.35, 0.42, bodyMaterial, 0.88, 0.74, -1.88, -0.02);
+    addExhaustPair(-0.58, -2.18, 1);
+    addPanelLines(1.96, 1.36, -1.44, 0.22);
+  }
+
+  const damperMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd7b845,
+    roughness: 0.32,
+    metalness: 0.45,
+  });
+  const damperRodMaterial = new THREE.MeshStandardMaterial({
+    color: 0xcfd9df,
+    roughness: 0.22,
+    metalness: 0.72,
+  });
+  for (const [index, point] of [
+    [-0.78, -0.13, 1.24],
+    [0.78, -0.13, 1.24],
+    [-0.78, -0.13, -1.24],
+    [0.78, -0.13, -1.24],
+  ].entries()) {
+    const [x, y, z] = point;
+    const spring = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.5, 10), damperMaterial);
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.68, 10), damperRodMaterial);
+    spring.name = `damperSpring${index}`;
+    rod.name = `damperRod${index}`;
+    spring.position.set(x, y, z);
+    rod.position.set(x, y, z);
+    spring.rotation.z = x < 0 ? -0.15 : 0.15;
+    rod.rotation.z = spring.rotation.z;
+    spring.castShadow = true;
+    rod.castShadow = true;
+    visualRoot.add(spring, rod);
+  }
+
+  const tunedMassMaterial = new THREE.MeshStandardMaterial({
+    color: design.accent,
+    roughness: 0.32,
+    metalness: 0.44,
+  });
+  const tunedMassBlock = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.14, 0.36), tunedMassMaterial);
+  tunedMassBlock.name = "tunedMassBlock";
+  tunedMassBlock.position.set(0, 0.48, -0.08);
+  tunedMassBlock.castShadow = true;
+  visualRoot.add(tunedMassBlock);
+
   group.add(visualRoot);
   return group;
 }
@@ -4822,7 +5180,7 @@ function getCarName(carId) {
 
 function updateWheelStyle() {
   const rimColor = CAR_MODELS[selectedCarId]?.rimColor ?? 0xc52d22;
-  const brakeColor = selectedCarId === "amg" ? 0x202427 : 0xf5bf29;
+  const brakeColor = CAR_MODELS[selectedCarId]?.brakeColor ?? 0xf5bf29;
 
   for (const wheel of wheelMeshes) {
     wheel.traverse((child) => {
@@ -6370,6 +6728,61 @@ function makeCarDecalTexture(text) {
     context.strokeText(text, 176, 98);
     context.fillStyle = "#c62922";
     context.fillText(text, 176, 98);
+  });
+}
+
+function makeJdmSideDecalTexture(text, accentHex = 0x2c68d8, modelId = "ae86") {
+  return makeCanvasTexture(512, 160, (context) => {
+    context.clearRect(0, 0, 512, 160);
+    const accent = cssColor(accentHex);
+
+    if (modelId === "ae86") {
+      context.fillStyle = "rgba(17, 20, 22, 0.95)";
+      context.fillRect(0, 92, 512, 48);
+      context.fillStyle = "rgba(255, 255, 255, 0.88)";
+      context.font = "700 22px Arial, sans-serif";
+      context.fillText("WATER ENGINE", 38, 78);
+      context.strokeStyle = accent;
+      context.lineWidth = 7;
+      context.beginPath();
+      context.moveTo(270, 118);
+      context.lineTo(350, 70);
+      context.lineTo(486, 96);
+      context.stroke();
+      context.font = "italic 900 62px Arial, sans-serif";
+      context.lineWidth = 5;
+      context.strokeStyle = "rgba(255, 255, 255, 0.82)";
+      context.strokeText(text, 344, 126);
+      context.fillStyle = accent;
+      context.fillText(text, 344, 126);
+      return;
+    }
+
+    if (modelId === "rx7fd") {
+      context.fillStyle = "rgba(10, 12, 13, 0.84)";
+      context.beginPath();
+      context.moveTo(34, 100);
+      context.bezierCurveTo(150, 60, 300, 58, 480, 94);
+      context.lineTo(460, 128);
+      context.bezierCurveTo(290, 106, 144, 108, 38, 136);
+      context.closePath();
+      context.fill();
+      context.fillStyle = accent;
+      context.font = "italic 900 46px Arial, sans-serif";
+      context.fillText(text, 290, 115);
+      context.fillStyle = "rgba(255, 255, 255, 0.78)";
+      context.font = "700 20px Arial, sans-serif";
+      context.fillText("TWIN ROTOR", 56, 100);
+      return;
+    }
+
+    context.fillStyle = "rgba(14, 16, 18, 0.72)";
+    context.fillRect(48, 92, 410, 28);
+    context.fillStyle = "rgba(210, 214, 218, 0.82)";
+    context.fillRect(72, 54, 338, 8);
+    context.fillStyle = accent;
+    context.font = "italic 800 36px Arial, sans-serif";
+    context.fillText(text, 278, 86);
   });
 }
 
