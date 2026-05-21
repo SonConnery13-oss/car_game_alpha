@@ -307,11 +307,25 @@ let boostAmount = 0;
 let driftLabelSprite = null;
 const driftSmokeParticles = [];
 const wallSparkParticles = [];
+const tireMarkSegments = [];
+const brakeLightTrails = [];
+const boostSpeedStreaks = [];
 const WALL_SPARK_GEOMETRY = new THREE.SphereGeometry(0.035, 6, 4);
 const WALL_SPARK_COLORS = [0xfff1a6, 0xffc247, 0xff742f];
+const TIRE_MARK_GEOMETRY = new THREE.BoxGeometry(0.34, 0.012, 1.08);
+const BRAKE_TRAIL_GEOMETRY = new THREE.BoxGeometry(0.13, 0.04, 1.7);
+const BOOST_STREAK_GEOMETRY = new THREE.BoxGeometry(0.045, 0.045, 2.7);
+const BOOST_STREAK_COLORS = [0x69c8ff, 0xa7ff5b, 0xff4fd8, 0xffd45a, 0xffffff];
+const TIRE_MARK_HOLD_SECONDS = 5;
+const TIRE_MARK_FADE_SECONDS = 3;
+const BRAKE_TRAIL_HOLD_SECONDS = 5;
+const BRAKE_TRAIL_FADE_SECONDS = 2.2;
 const MULTIPLAYER_SEND_INTERVAL = 1000 / 20;
 const REMOTE_INTERPOLATION_MS = 140;
 let lastWallSparkAt = 0;
+let tireMarkAccumulator = 0;
+let brakeTrailAccumulator = 0;
+let boostStreakAccumulator = 0;
 const vehicleDynamics = {
   braking: false,
   throttle: false,
@@ -5605,7 +5619,13 @@ function updateVehicleMeshes(delta) {
 
   updateSuspensionVisual(delta);
   updateTunedMassVisual();
+  emitDriftTireMarks(delta);
+  emitBrakeLightTrails(delta);
+  emitBoostSpeedStreaks(delta);
   emitDriftSmoke(delta);
+  updateDriftTireMarks(delta);
+  updateBrakeLightTrails(delta);
+  updateBoostSpeedStreaks(delta);
   updateDriftSmoke(delta);
   updateWallSparks(delta);
   updateDriftLabel(delta);
@@ -5716,37 +5736,310 @@ function keepQuaternionNearTarget(quaternion, target, maxAngle) {
   quaternion.normalize();
 }
 
+function getHorizontalVehicleForward() {
+  const forward = new THREE.Vector3(vehicleDynamics.lastForward.x, 0, vehicleDynamics.lastForward.z);
+  if (forward.lengthSq() < 0.0001) {
+    forward.set(0, 0, 1).applyQuaternion(carVisualMotion.quaternion);
+    forward.y = 0;
+  }
+  return forward.lengthSq() > 0.0001 ? forward.normalize() : new THREE.Vector3(0, 0, 1);
+}
+
+function getHorizontalVehicleRight() {
+  const right = new THREE.Vector3(vehicleDynamics.lastRight.x, 0, vehicleDynamics.lastRight.z);
+  if (right.lengthSq() < 0.0001) {
+    right.set(1, 0, 0).applyQuaternion(carVisualMotion.quaternion);
+    right.y = 0;
+  }
+  return right.lengthSq() > 0.0001 ? right.normalize() : new THREE.Vector3(1, 0, 0);
+}
+
+function getHorizontalTravelDirection() {
+  const velocity = new THREE.Vector3(chassisBody.velocity.x, 0, chassisBody.velocity.z);
+  return velocity.lengthSq() > 0.01 ? velocity.normalize() : getHorizontalVehicleForward();
+}
+
+function getYawQuaternion(direction) {
+  const yaw = Math.atan2(direction.x, direction.z);
+  return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+}
+
+function setGroundEffectHeight(mesh, offset = 0.025) {
+  mesh.position.y = getTrackElevation(mesh.position.x, mesh.position.z) + TRACK_SURFACE_OFFSET + offset;
+}
+
+function disposeEffectMesh(mesh, disposeGeometry = false) {
+  scene.remove(mesh);
+  if (disposeGeometry) mesh.geometry.dispose();
+  if (Array.isArray(mesh.material)) {
+    for (const material of mesh.material) material.dispose();
+  } else {
+    mesh.material.dispose();
+  }
+}
+
+function trimEffectArray(array, maxCount) {
+  while (array.length > maxCount) {
+    disposeEffectMesh(array.shift());
+  }
+}
+
+function emitDriftTireMarks(delta) {
+  const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
+  const shouldMark = !paused && driftAmount > 0.18 && vehicleDynamics.grounded && speedAbs > 5.8;
+  if (!shouldMark) {
+    tireMarkAccumulator = Math.min(tireMarkAccumulator, 0.4);
+    return;
+  }
+
+  const speedFactor = THREE.MathUtils.clamp(speedAbs / 32, 0, 1);
+  tireMarkAccumulator += delta * THREE.MathUtils.lerp(10, 24, Math.max(driftAmount, speedFactor));
+
+  let emitted = 0;
+  while (tireMarkAccumulator >= 1 && emitted < 4) {
+    tireMarkAccumulator -= 1;
+    createTireMarkSegment(2, speedFactor);
+    createTireMarkSegment(3, speedFactor);
+    emitted += 1;
+  }
+  trimEffectArray(tireMarkSegments, 430);
+}
+
+function createTireMarkSegment(wheelIndex, speedFactor) {
+  const wheel = wheelMeshes[wheelIndex];
+  if (!wheel) return;
+
+  const direction = getHorizontalTravelDirection();
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x050505,
+    transparent: true,
+    opacity: THREE.MathUtils.lerp(0.22, 0.42, driftAmount),
+    depthWrite: false,
+  });
+  const mark = new THREE.Mesh(TIRE_MARK_GEOMETRY, material);
+
+  mark.position.copy(wheel.position);
+  mark.position.addScaledVector(direction, -0.18 - Math.random() * 0.2);
+  setGroundEffectHeight(mark, 0.024);
+  mark.quaternion.copy(getYawQuaternion(direction));
+  mark.rotation.y += (Math.random() - 0.5) * 0.08;
+  mark.scale.set(
+    THREE.MathUtils.lerp(0.72, 1.18, driftAmount),
+    1,
+    THREE.MathUtils.lerp(0.72, 1.5, speedFactor),
+  );
+  mark.renderOrder = 9;
+  mark.userData.age = 0;
+  mark.userData.hold = TIRE_MARK_HOLD_SECONDS;
+  mark.userData.fade = TIRE_MARK_FADE_SECONDS;
+  mark.userData.initialOpacity = mark.material.opacity;
+
+  tireMarkSegments.push(mark);
+  scene.add(mark);
+}
+
+function updateDriftTireMarks(delta) {
+  updateFadingMeshList(tireMarkSegments, delta);
+}
+
+function emitBrakeLightTrails(delta) {
+  const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
+  const driftTrail = driftAmount > 0.18 && vehicleDynamics.grounded && speedAbs > 6.5;
+  const brakeTrail = vehicleDynamics.braking && speedAbs > 2.2;
+  if (paused || (!driftTrail && !brakeTrail)) {
+    brakeTrailAccumulator = Math.min(brakeTrailAccumulator, 0.4);
+    return;
+  }
+
+  const intensity = Math.max(brakeTrail ? 0.95 : 0, driftTrail ? THREE.MathUtils.lerp(0.55, 0.95, driftAmount) : 0);
+  brakeTrailAccumulator += delta * THREE.MathUtils.lerp(8, 18, intensity);
+
+  let emitted = 0;
+  while (brakeTrailAccumulator >= 1 && emitted < 3) {
+    brakeTrailAccumulator -= 1;
+    createBrakeLightTrail(-1, intensity);
+    createBrakeLightTrail(1, intensity);
+    emitted += 1;
+  }
+  trimEffectArray(brakeLightTrails, 320);
+}
+
+function createBrakeLightTrail(side, intensity) {
+  const forward = getHorizontalVehicleForward();
+  const right = getHorizontalVehicleRight();
+  const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
+  const speedFactor = THREE.MathUtils.clamp(speedAbs / 42, 0, 1);
+  const lengthScale = THREE.MathUtils.lerp(0.78, 1.55, Math.max(intensity, speedFactor));
+  const rearLight = carVisualMotion.position
+    .clone()
+    .addScaledVector(right, side * 0.62)
+    .addScaledVector(forward, -2.12);
+  rearLight.y += 0.42;
+
+  const trail = new THREE.Mesh(
+    BRAKE_TRAIL_GEOMETRY,
+    new THREE.MeshBasicMaterial({
+      color: side < 0 ? 0xff2e24 : 0xff4934,
+      transparent: true,
+      opacity: THREE.MathUtils.lerp(0.34, 0.72, intensity),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  trail.position.copy(rearLight).addScaledVector(forward, -0.88 * lengthScale);
+  trail.quaternion.copy(getYawQuaternion(forward));
+  trail.scale.z = lengthScale;
+  trail.renderOrder = 12;
+  trail.userData.age = 0;
+  trail.userData.hold = BRAKE_TRAIL_HOLD_SECONDS;
+  trail.userData.fade = BRAKE_TRAIL_FADE_SECONDS;
+  trail.userData.initialOpacity = trail.material.opacity;
+  trail.userData.velocity = forward.clone().multiplyScalar(-THREE.MathUtils.lerp(0.8, 4.5, speedFactor));
+
+  brakeLightTrails.push(trail);
+  scene.add(trail);
+}
+
+function updateBrakeLightTrails(delta) {
+  updateFadingMeshList(brakeLightTrails, delta, true);
+}
+
+function emitBoostSpeedStreaks(delta) {
+  if (paused || boostAmount < 0.04) {
+    boostStreakAccumulator = Math.min(boostStreakAccumulator, 0.4);
+    return;
+  }
+
+  boostStreakAccumulator += delta * THREE.MathUtils.lerp(18, 48, boostAmount);
+  let emitted = 0;
+  while (boostStreakAccumulator >= 1 && emitted < 6) {
+    boostStreakAccumulator -= 1;
+    createBoostSpeedStreak();
+    emitted += 1;
+  }
+  trimEffectArray(boostSpeedStreaks, 160);
+}
+
+function createBoostSpeedStreak() {
+  const forward = getHorizontalVehicleForward();
+  const right = getHorizontalVehicleRight();
+  const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
+  const color = BOOST_STREAK_COLORS[Math.floor(Math.random() * BOOST_STREAK_COLORS.length)];
+  const side = (Math.random() - 0.5) * 2.9;
+  const longitudinal = THREE.MathUtils.lerp(-2.3, 1.6, Math.random());
+  const height = THREE.MathUtils.lerp(0.32, 1.3, Math.random());
+  const lengthScale = THREE.MathUtils.lerp(0.85, 2.25, boostAmount);
+
+  const streak = new THREE.Mesh(
+    BOOST_STREAK_GEOMETRY,
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: THREE.MathUtils.lerp(0.42, 0.88, boostAmount),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  streak.position
+    .copy(carVisualMotion.position)
+    .addScaledVector(right, side)
+    .addScaledVector(forward, longitudinal);
+  streak.position.y += height;
+  streak.quaternion.copy(getYawQuaternion(forward));
+  streak.scale.z = lengthScale;
+  streak.renderOrder = 13;
+  streak.userData.life = THREE.MathUtils.lerp(0.28, 0.48, Math.random());
+  streak.userData.maxLife = streak.userData.life;
+  streak.userData.velocity = forward
+    .clone()
+    .multiplyScalar(-(24 + Math.random() * 34 + speedAbs * 0.58))
+    .addScaledVector(right, (Math.random() - 0.5) * 4);
+
+  boostSpeedStreaks.push(streak);
+  scene.add(streak);
+}
+
+function updateBoostSpeedStreaks(delta) {
+  for (let i = boostSpeedStreaks.length - 1; i >= 0; i -= 1) {
+    const streak = boostSpeedStreaks[i];
+    streak.userData.life -= delta;
+    streak.position.addScaledVector(streak.userData.velocity, delta);
+    streak.material.opacity = Math.max(0, streak.userData.life / streak.userData.maxLife) * 0.82;
+    streak.scale.z *= 1 + delta * 2.4;
+
+    if (streak.userData.life <= 0) {
+      disposeEffectMesh(streak);
+      boostSpeedStreaks.splice(i, 1);
+    }
+  }
+}
+
+function updateFadingMeshList(meshes, delta, moveWithVelocity = false) {
+  for (let i = meshes.length - 1; i >= 0; i -= 1) {
+    const mesh = meshes[i];
+    mesh.userData.age += delta;
+    if (moveWithVelocity && mesh.userData.velocity) {
+      mesh.position.addScaledVector(mesh.userData.velocity, delta);
+    }
+
+    const fadeStart = mesh.userData.hold;
+    const fadeDuration = mesh.userData.fade;
+    const fade = mesh.userData.age <= fadeStart
+      ? 1
+      : 1 - THREE.MathUtils.clamp((mesh.userData.age - fadeStart) / fadeDuration, 0, 1);
+    mesh.material.opacity = mesh.userData.initialOpacity * fade;
+
+    if (fade <= 0) {
+      disposeEffectMesh(mesh);
+      meshes.splice(i, 1);
+    }
+  }
+}
+
 function emitDriftSmoke(delta) {
-  if (driftAmount < 0.12 || !vehicleDynamics.grounded || Math.abs(vehicleDynamics.signedSpeed) < 7) return;
+  if (paused || driftAmount < 0.12 || !vehicleDynamics.grounded || Math.abs(vehicleDynamics.signedSpeed) < 7) return;
 
-  const emissionChance = driftAmount * Math.min(Math.abs(vehicleDynamics.signedSpeed) / 26, 1) * delta * 30;
-  if (Math.random() > emissionChance) return;
+  const emissionIntensity = driftAmount * Math.min(Math.abs(vehicleDynamics.signedSpeed) / 26, 1) * delta * 55;
+  const emissionCount = Math.min(
+    3,
+    Math.floor(emissionIntensity) + (Math.random() < emissionIntensity % 1 ? 1 : 0),
+  );
+  if (emissionCount <= 0) return;
 
-  for (const wheelIndex of [2, 3]) {
-    const wheel = wheelMeshes[wheelIndex];
-    if (!wheel) continue;
+  for (let emissionIndex = 0; emissionIndex < emissionCount; emissionIndex += 1) {
+    for (const wheelIndex of [2, 3]) {
+      const wheel = wheelMeshes[wheelIndex];
+      if (!wheel) continue;
 
-    const puff = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 8, 6),
-      new THREE.MeshBasicMaterial({
-        color: 0xaeb2b1,
-        transparent: true,
-        opacity: 0.22,
-        depthWrite: false,
-      }),
-    );
-    puff.position.copy(wheel.position);
-    puff.position.y += 0.08;
-    puff.scale.setScalar(0.55 + Math.random() * 0.25);
-    puff.userData.life = 0.75;
-    puff.userData.maxLife = 0.75;
-    puff.userData.velocity = new THREE.Vector3(
-      (Math.random() - 0.5) * 0.35,
-      0.35 + Math.random() * 0.22,
-      (Math.random() - 0.5) * 0.35,
-    );
-    driftSmokeParticles.push(puff);
-    scene.add(puff);
+      const puff = new THREE.Mesh(
+        new THREE.SphereGeometry(0.28, 8, 6),
+        new THREE.MeshBasicMaterial({
+          color: 0xaeb2b1,
+          transparent: true,
+          opacity: 0.3,
+          depthWrite: false,
+        }),
+      );
+      puff.position.copy(wheel.position);
+      puff.position.y += 0.08;
+      puff.scale.setScalar(0.72 + Math.random() * 0.42);
+      puff.userData.life = 1.05;
+      puff.userData.maxLife = 1.05;
+      puff.userData.velocity = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.58,
+        0.44 + Math.random() * 0.36,
+        (Math.random() - 0.5) * 0.58,
+      );
+      driftSmokeParticles.push(puff);
+      scene.add(puff);
+    }
+  }
+
+  while (driftSmokeParticles.length > 240) {
+    const oldPuff = driftSmokeParticles.shift();
+    scene.remove(oldPuff);
+    oldPuff.geometry.dispose();
+    oldPuff.material.dispose();
   }
 }
 
@@ -6596,7 +6889,19 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
     scene.remove(spark);
     spark.material.dispose();
   }
+  for (const mark of tireMarkSegments.splice(0)) {
+    disposeEffectMesh(mark);
+  }
+  for (const trail of brakeLightTrails.splice(0)) {
+    disposeEffectMesh(trail);
+  }
+  for (const streak of boostSpeedStreaks.splice(0)) {
+    disposeEffectMesh(streak);
+  }
   lastWallSparkAt = 0;
+  tireMarkAccumulator = 0;
+  brakeTrailAccumulator = 0;
+  boostStreakAccumulator = 0;
   for (const wheelState of wheelVisualStates) {
     wheelState.compression = 0;
     wheelState.previousCompression = 0;
