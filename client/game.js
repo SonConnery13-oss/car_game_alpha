@@ -166,6 +166,9 @@ let rankingsCourseId = selectedCourseId;
 let activeCourse = COURSE_DEFS[selectedCourseId];
 let skyDome = null;
 const ROAD_WIDTH = activeCourse.roadWidth ?? DEFAULT_ROAD_WIDTH;
+const START_GRID_WIDTH = Math.max(ROAD_WIDTH + 12, 24);
+const RACE_GRID_SPACING = 4.8;
+const RACE_GRID_ROW_SPACING = 5.8;
 const trackPoints = createTrackPoints(activeCourse);
 const START_INDEX = activeCourse.startIndex ?? 0;
 const FINISH_INDEX = activeCourse.finishIndex ?? (activeCourse.loop ? START_INDEX : trackPoints.length - 1);
@@ -346,6 +349,16 @@ const multiplayer = {
   connected: false,
   joined: false,
   lastSentAt: 0,
+};
+const raceSession = {
+  id: null,
+  status: "idle",
+  mode: "idle",
+  startAt: null,
+  gridSlot: 0,
+  gridTotal: 1,
+  participants: [],
+  results: [],
 };
 const tunedDamperState = {
   heave: 0,
@@ -1454,7 +1467,7 @@ function createStartLine() {
   const group = new THREE.Group();
   const stripeMaterialA = new THREE.MeshBasicMaterial({ color: 0xf7f7f2 });
   const stripeMaterialB = new THREE.MeshBasicMaterial({ color: 0x111416 });
-  addCheckeredGate(group, START_GATE, stripeMaterialA, stripeMaterialB);
+  addCheckeredGate(group, START_GATE, stripeMaterialA, stripeMaterialB, START_GRID_WIDTH);
 
   if (!activeCourse.loop) {
     addCheckeredGate(group, FINISH_GATE, stripeMaterialA, stripeMaterialB);
@@ -1530,18 +1543,18 @@ function createCheckpointMarkers() {
   scene.add(group);
 }
 
-function addCheckeredGate(group, gate, stripeMaterialA, stripeMaterialB) {
+function addCheckeredGate(group, gate, stripeMaterialA, stripeMaterialB, width = ROAD_WIDTH) {
   const center = gate.center;
   const normal = gate.normal;
   const tangent = gate.tangent;
   const yaw = Math.atan2(tangent.x, tangent.y);
 
   for (let i = 0; i < 8; i += 1) {
-    const lateralOffset = -ROAD_WIDTH / 2 + ROAD_WIDTH / 16 + (i * ROAD_WIDTH) / 8;
+    const lateralOffset = -width / 2 + width / 16 + (i * width) / 8;
     const position = center.clone().addScaledVector(normal, lateralOffset);
     const y = getTrackElevation(position.x, position.y) + TRACK_SURFACE_OFFSET + 0.14;
     const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(ROAD_WIDTH / 8, 0.035, 1.05),
+      new THREE.BoxGeometry(width / 8, 0.035, 1.05),
       i % 2 === 0 ? stripeMaterialA : stripeMaterialB,
     );
     stripe.position.set(position.x, y, position.y);
@@ -3738,6 +3751,12 @@ function initializeMultiplayer() {
   multiplayer.socket.on("leaderboard:snapshot", handleLeaderboardSnapshot);
   multiplayer.socket.on("leaderboard:updated", handleLeaderboardUpdated);
   multiplayer.socket.on("leaderboard:accepted", handleLeaderboardAccepted);
+  multiplayer.socket.on("race:countdown", handleRaceCountdown);
+  multiplayer.socket.on("race:started", handleRaceStarted);
+  multiplayer.socket.on("race:spectate", handleRaceSpectate);
+  multiplayer.socket.on("race:finished", handleRaceFinished);
+  multiplayer.socket.on("race:completed", handleRaceCompleted);
+  multiplayer.socket.on("race:lineup", handleRaceLineup);
 }
 
 function joinMultiplayerRoom(roomId = "lobby", isReconnect = false) {
@@ -3776,6 +3795,12 @@ function handleMultiplayerJoined(payload = {}) {
     handleLeaderboardSnapshot({ leaderboard: payload.leaderboard });
   } else {
     requestLeaderboardSnapshot();
+  }
+
+  if (payload.race) {
+    handleRaceSnapshot(payload.race);
+  } else {
+    resetRaceSession();
   }
 
   updateMultiplayerRoomStatus(payload.players?.length ?? remotePlayers.size + 1);
@@ -3823,7 +3848,6 @@ function handleLeaderboardAccepted(payload = {}) {
 
 function refreshLeaderboardViews() {
   if (rankingsScreen && !rankingsScreen.hidden) renderRankingsScreen();
-  if (resultsOverlay && !resultsOverlay.hidden) renderLeaderboard(currentPlayer?.key ?? null);
 }
 
 function normalizeLeaderboardPayload(payload = {}) {
@@ -3896,6 +3920,262 @@ function compareLeaderboardRecords(a, b) {
   return a.time - b.time || a.id.localeCompare(b.id);
 }
 
+function requestRaceStart() {
+  if (!multiplayer.socket?.connected || !multiplayer.joined) {
+    startLocalRace();
+    return;
+  }
+
+  if (isActiveRaceSession()) {
+    enterSpectatorMode();
+    multiplayer.socket.emit("race:startRequest");
+    return;
+  }
+
+  message.textContent = "MATCHING";
+  message.classList.add("is-visible");
+  multiplayer.socket.emit("race:startRequest");
+}
+
+function startLocalRace() {
+  setupRaceScreen();
+  resetRaceSession();
+  resetCar(0, 1);
+  startPreRaceSequence();
+}
+
+function setupRaceScreen({ keepResults = false } = {}) {
+  blurActiveUiControl();
+  cancelRaceCountdown();
+  if (!keepResults) hideResultsOverlay();
+  raceFinished = false;
+  menuActive = false;
+  mainMenu?.classList.add("is-hidden");
+  if (developersScreen) developersScreen.hidden = true;
+  if (garageScreen) garageScreen.hidden = true;
+  if (rankingsScreen) rankingsScreen.hidden = true;
+  if (loginScreen) loginScreen.hidden = true;
+  if (signupScreen) signupScreen.hidden = true;
+  if (menuReturnButton) menuReturnButton.hidden = false;
+  keys.clear();
+}
+
+function resetRaceSession() {
+  raceSession.id = null;
+  raceSession.status = "idle";
+  raceSession.mode = "idle";
+  raceSession.startAt = null;
+  raceSession.gridSlot = 0;
+  raceSession.gridTotal = 1;
+  raceSession.participants = [];
+  raceSession.results = [];
+}
+
+function isActiveRaceSession() {
+  return raceSession.status === "countdown" || raceSession.status === "racing";
+}
+
+function handleRaceSnapshot(payload = {}) {
+  if (!isRacePayloadForCurrentCourse(payload)) {
+    resetRaceSession();
+    return;
+  }
+
+  updateRaceSession(payload);
+  if (isActiveRaceSession() && raceSession.mode === "spectator") {
+    enterSpectatorMode();
+  }
+}
+
+function handleRaceCountdown(payload = {}) {
+  if (!isRacePayloadForCurrentCourse(payload)) return;
+
+  updateRaceSession(payload);
+  const participant = getSelfRaceParticipant();
+  if (!participant) {
+    enterSpectatorMode();
+    return;
+  }
+
+  raceSession.mode = "participant";
+  raceSession.gridSlot = participant.gridSlot ?? 0;
+  raceSession.gridTotal = Math.max(raceSession.participants.length, 1);
+  raceSession.results = [];
+
+  setupRaceScreen();
+  resetCar(raceSession.gridSlot, raceSession.gridTotal);
+  startPreRaceSequence({ startAt: raceSession.startAt, raceId: raceSession.id });
+}
+
+function handleRaceStarted(payload = {}) {
+  if (!isRacePayloadForCurrentCourse(payload)) return;
+  updateRaceSession(payload);
+  if (raceSession.mode === "spectator") enterSpectatorMode();
+}
+
+function handleRaceSpectate(payload = {}) {
+  if (!isRacePayloadForCurrentCourse(payload)) return;
+  updateRaceSession({ ...payload, viewerMode: "spectator" });
+  enterSpectatorMode();
+}
+
+function handleRaceFinished(payload = {}) {
+  if (payload.courseId && payload.courseId !== selectedCourseId) return;
+
+  const result = normalizeRaceResult(payload.result);
+  if (result) rememberRaceResult(result);
+  raceSession.results = normalizeRaceResults(payload.results ?? raceSession.results);
+
+  if (resultsOverlay && !resultsOverlay.hidden) {
+    renderRaceResults(currentPlayer?.key ?? multiplayer.selfId ?? null);
+  }
+}
+
+function handleRaceCompleted(payload = {}) {
+  if (!isRacePayloadForCurrentCourse(payload)) return;
+
+  updateRaceSession(payload);
+  raceSession.status = "completed";
+  paused = true;
+  syncPauseButton();
+
+  if (raceSession.mode === "spectator") {
+    message.textContent = "RACE END";
+    message.classList.add("is-visible");
+  }
+
+  if (resultsOverlay && !resultsOverlay.hidden) {
+    renderRaceResults(currentPlayer?.key ?? multiplayer.selfId ?? null);
+  }
+}
+
+function handleRaceLineup(payload = {}) {
+  if (payload.courseId !== selectedCourseId) return;
+
+  const participants = normalizeRaceParticipants(payload.participants);
+  const selfIndex = participants.findIndex((participant) => participant.id === multiplayer.selfId);
+  const gridSlot = selfIndex >= 0 ? participants[selfIndex].gridSlot ?? selfIndex : participants.length;
+  const gridTotal = Math.max(participants.length, 1);
+
+  resetRaceSession();
+  raceSession.participants = participants;
+  raceSession.gridSlot = gridSlot;
+  raceSession.gridTotal = gridTotal;
+  setupRaceScreen({ keepResults: Boolean(resultsOverlay && !resultsOverlay.hidden) });
+  resetCar(gridSlot, gridTotal);
+  paused = true;
+  pauseStartedAt = null;
+  syncPauseButton();
+  message.textContent = "READY";
+  message.classList.add("is-visible");
+}
+
+function updateRaceSession(payload = {}) {
+  raceSession.id = payload.id ?? raceSession.id;
+  raceSession.status = payload.status ?? raceSession.status;
+  raceSession.startAt = Number.isFinite(Number(payload.startAt)) ? Number(payload.startAt) : raceSession.startAt;
+  raceSession.participants = normalizeRaceParticipants(payload.participants);
+  raceSession.results = normalizeRaceResults(payload.results);
+
+  const participant = getSelfRaceParticipant();
+  raceSession.mode = payload.viewerMode ?? (participant ? "participant" : "spectator");
+  raceSession.gridSlot = participant?.gridSlot ?? payload.viewerGridSlot ?? raceSession.gridSlot ?? 0;
+  raceSession.gridTotal = Math.max(raceSession.participants.length, 1);
+}
+
+function normalizeRaceParticipants(participants = []) {
+  return (Array.isArray(participants) ? participants : [])
+    .map((participant, index) => ({
+      id: String(participant.id ?? ""),
+      playerId: normalizeLeaderboardKey(participant.playerId ?? participant.key ?? participant.id),
+      displayName: String(participant.displayName ?? participant.id ?? "PLAYER").trim().slice(0, 24) || "PLAYER",
+      carId: String(participant.carId ?? "gt3").trim().slice(0, 24) || "gt3",
+      gridSlot: Number.isFinite(Number(participant.gridSlot)) ? Number(participant.gridSlot) : index,
+      finished: Boolean(participant.finished),
+      finishTime: Number.isFinite(Number(participant.finishTime)) ? Number(participant.finishTime) : null,
+    }))
+    .filter((participant) => participant.id);
+}
+
+function normalizeRaceResults(results = []) {
+  const records = [];
+  for (const rawResult of Array.isArray(results) ? results : []) {
+    const result = normalizeRaceResult(rawResult);
+    if (result) records.push(result);
+  }
+  return records.sort(compareRaceResults);
+}
+
+function normalizeRaceResult(result = {}) {
+  if (!result || typeof result !== "object") return null;
+
+  const time = Number(result.time);
+  if (!Number.isFinite(time) || time <= 0) return null;
+
+  const socketId = String(result.id ?? "");
+  const playerId = normalizeLeaderboardKey(result.playerId ?? result.key ?? result.id);
+  return {
+    id: socketId,
+    playerId,
+    displayName: String(result.displayName ?? result.id ?? "PLAYER").trim().slice(0, 24) || "PLAYER",
+    carId: String(result.carId ?? "gt3").trim().slice(0, 24) || "gt3",
+    time,
+    finishedAt: Number.isFinite(Number(result.finishedAt)) ? Number(result.finishedAt) : Date.now(),
+  };
+}
+
+function rememberRaceResult(result) {
+  const existingIndex = raceSession.results.findIndex((entry) => entry.id === result.id || entry.playerId === result.playerId);
+  if (existingIndex >= 0) raceSession.results.splice(existingIndex, 1, result);
+  else raceSession.results.push(result);
+  raceSession.results.sort(compareRaceResults);
+}
+
+function compareRaceResults(a, b) {
+  return a.time - b.time || a.displayName.localeCompare(b.displayName);
+}
+
+function getSelfRaceParticipant() {
+  return raceSession.participants.find((participant) => participant.id === multiplayer.selfId) ?? null;
+}
+
+function isRacePayloadForCurrentCourse(payload = {}) {
+  return Boolean(payload && payload.courseId === selectedCourseId);
+}
+
+function enterSpectatorMode() {
+  setupRaceScreen();
+  paused = true;
+  pauseStartedAt = null;
+  raceFinished = false;
+  raceSession.mode = "spectator";
+  syncPauseButton();
+  cameraRig.initialized = false;
+  message.textContent = "SPECTATING";
+  message.classList.add("is-visible");
+}
+
+function submitRaceFinish(finishTime) {
+  if (!multiplayer.socket?.connected || !raceSession.id || raceSession.mode !== "participant") return;
+
+  multiplayer.socket.emit("race:finish", {
+    raceId: raceSession.id,
+    courseId: selectedCourseId,
+    finishTime,
+  });
+}
+
+function createLocalRaceResult(finishTime) {
+  return {
+    id: multiplayer.selfId ?? currentPlayer?.key ?? "local",
+    playerId: currentPlayer?.key ?? multiplayer.selfId ?? "local",
+    displayName: currentPlayer?.id ?? "PLAYER",
+    carId: selectedCarId,
+    time: finishTime,
+    finishedAt: Date.now(),
+  };
+}
+
 function createOrUpdateRemotePlayer(player = {}) {
   if (!player.id || player.id === multiplayer.selfId) return;
 
@@ -3947,12 +4227,19 @@ function createOrUpdateRemotePlayer(player = {}) {
 function handleRemotePlayerState(payload = {}) {
   if (!payload.id || payload.id === multiplayer.selfId) return;
 
+  const payloadCourseId = payload.courseId ?? payload.state?.courseId;
+  if (payloadCourseId !== selectedCourseId) {
+    removeRemotePlayer(payload.id);
+    return;
+  }
+
   let remote = remotePlayers.get(payload.id);
   if (!remote) {
     createOrUpdateRemotePlayer({
       id: payload.id,
-      carId: "gt3",
-      courseId: selectedCourseId,
+      displayName: payload.displayName,
+      carId: payload.carId ?? "gt3",
+      courseId: payloadCourseId,
       state: payload.state,
     });
     remote = remotePlayers.get(payload.id);
@@ -4117,6 +4404,8 @@ function sendMultiplayerState(force = false) {
 
 function getMultiplayerState() {
   return {
+    courseId: selectedCourseId,
+    raceId: raceSession.id,
     position: {
       x: chassisBody.position.x,
       y: chassisBody.position.y,
@@ -4241,21 +4530,7 @@ function startGame() {
     return;
   }
 
-  blurActiveUiControl();
-  cancelRaceCountdown();
-  hideResultsOverlay();
-  raceFinished = false;
-  menuActive = false;
-  mainMenu?.classList.add("is-hidden");
-  if (developersScreen) developersScreen.hidden = true;
-  if (garageScreen) garageScreen.hidden = true;
-  if (rankingsScreen) rankingsScreen.hidden = true;
-  if (loginScreen) loginScreen.hidden = true;
-  if (signupScreen) signupScreen.hidden = true;
-  if (menuReturnButton) menuReturnButton.hidden = false;
-  keys.clear();
-  resetCar();
-  startPreRaceSequence();
+  requestRaceStart();
 }
 
 function showMenuScreen(screen) {
@@ -4281,8 +4556,12 @@ function showMainMenu() {
 }
 
 function returnToMenu() {
+  if (isActiveRaceSession() && raceSession.mode === "participant") {
+    multiplayer.socket?.emit("race:leave");
+  }
   cancelRaceCountdown();
   hideResultsOverlay();
+  resetRaceSession();
   menuActive = true;
   paused = true;
   raceFinished = false;
@@ -4312,20 +4591,7 @@ function retryRace() {
     return;
   }
 
-  cancelRaceCountdown();
-  hideResultsOverlay();
-  raceFinished = false;
-  menuActive = false;
-  mainMenu?.classList.add("is-hidden");
-  if (developersScreen) developersScreen.hidden = true;
-  if (garageScreen) garageScreen.hidden = true;
-  if (rankingsScreen) rankingsScreen.hidden = true;
-  if (loginScreen) loginScreen.hidden = true;
-  if (signupScreen) signupScreen.hidden = true;
-  if (menuReturnButton) menuReturnButton.hidden = false;
-  keys.clear();
-  resetCar();
-  startPreRaceSequence();
+  requestRaceStart();
 }
 
 function cancelRaceCountdown() {
@@ -4339,7 +4605,7 @@ function wait(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function startPreRaceSequence() {
+async function startPreRaceSequence({ startAt = null } = {}) {
   const token = ++raceCountdownToken;
   raceCountdownActive = true;
   paused = true;
@@ -4352,19 +4618,34 @@ async function startPreRaceSequence() {
     controlsHint.classList.add("is-visible");
   }
 
-  const steps = [
-    ["READY", 900],
-    ["1", 650],
-    ["2", 650],
-    ["3", 650],
-    ["START!", 520],
-  ];
+  if (Number.isFinite(startAt)) {
+    const steps = [
+      ["3", startAt - 3000],
+      ["2", startAt - 2000],
+      ["1", startAt - 1000],
+      ["START!", startAt],
+    ];
 
-  for (const [text, duration] of steps) {
-    if (token !== raceCountdownToken) return;
-    message.textContent = text;
-    message.classList.add("is-visible");
-    await wait(duration);
+    for (const [text, targetTime] of steps) {
+      await wait(Math.max(0, targetTime - Date.now()));
+      if (token !== raceCountdownToken) return;
+      message.textContent = text;
+      message.classList.add("is-visible");
+    }
+  } else {
+    const steps = [
+      ["3", 800],
+      ["2", 800],
+      ["1", 800],
+      ["START!", 520],
+    ];
+
+    for (const [text, duration] of steps) {
+      if (token !== raceCountdownToken) return;
+      message.textContent = text;
+      message.classList.add("is-visible");
+      await wait(duration);
+    }
   }
 
   if (token !== raceCountdownToken) return;
@@ -4376,6 +4657,7 @@ async function startPreRaceSequence() {
   paused = false;
   pauseStartedAt = null;
   lapStartedAt = performance.now();
+  if (raceSession.id) raceSession.status = "racing";
   syncPauseButton();
   readyTimeout = window.setTimeout(() => message.classList.remove("is-visible"), 700);
 }
@@ -5418,17 +5700,9 @@ function updateTunedMassVisual() {
 }
 
 function updateCamera(delta) {
-  const carPosition = carVisualMotion.initialized
-    ? carVisualMotion.position.clone()
-    : new THREE.Vector3(chassisBody.position.x, chassisBody.position.y, chassisBody.position.z);
-  const carQuaternion = carVisualMotion.initialized
-    ? carVisualMotion.quaternion.clone()
-    : new THREE.Quaternion(
-        chassisBody.quaternion.x,
-        chassisBody.quaternion.y,
-        chassisBody.quaternion.z,
-        chassisBody.quaternion.w,
-      );
+  const cameraSubject = getCameraSubject();
+  const carPosition = cameraSubject.position;
+  const carQuaternion = cameraSubject.quaternion;
   const rawForward = new THREE.Vector3(0, 0, 1).applyQuaternion(carQuaternion).normalize();
   const horizontalForward = new THREE.Vector3(rawForward.x, 0, rawForward.z);
   if (horizontalForward.lengthSq() < 0.0001) horizontalForward.set(0, 0, 1);
@@ -5436,7 +5710,7 @@ function updateCamera(delta) {
 
   const up = new THREE.Vector3(0, 1, 0);
   const focusTarget = carPosition.clone();
-  focusTarget.y = getTrackElevation(chassisBody.position.x, chassisBody.position.z) + 0.88;
+  focusTarget.y = getTrackElevation(carPosition.x, carPosition.z) + 0.88;
 
   if (!cameraRig.initialized) {
     cameraRig.initialized = true;
@@ -5444,7 +5718,7 @@ function updateCamera(delta) {
     cameraRig.forward.copy(horizontalForward);
   }
 
-  const speedFactor = THREE.MathUtils.clamp(Math.abs(vehicleDynamics.signedSpeed) / getMaxForwardSpeed(), 0, 1);
+  const speedFactor = THREE.MathUtils.clamp(cameraSubject.speed / getMaxForwardSpeed(), 0, 1);
   const focusBlend = 1 - Math.exp(-(10.5 + speedFactor * 5.5) * delta);
   const forwardBlend = 1 - Math.exp(-(6.5 + speedFactor * 5.5) * delta);
   cameraRig.focus.lerp(focusTarget, focusBlend);
@@ -5486,6 +5760,47 @@ function updateCamera(delta) {
   if (!cameraRig.lookTarget.lengthSq()) cameraRig.lookTarget.copy(lookTarget);
   cameraRig.lookTarget.lerp(lookTarget, lookBlend);
   camera.lookAt(cameraRig.lookTarget);
+}
+
+function getCameraSubject() {
+  const spectatedRemote = getSpectatedRemotePlayer();
+  if (spectatedRemote) {
+    return {
+      position: spectatedRemote.renderPosition.clone(),
+      quaternion: spectatedRemote.renderQuaternion.clone(),
+      speed: spectatedRemote.velocity.length(),
+    };
+  }
+
+  return {
+    position: carVisualMotion.initialized
+      ? carVisualMotion.position.clone()
+      : new THREE.Vector3(chassisBody.position.x, chassisBody.position.y, chassisBody.position.z),
+    quaternion: carVisualMotion.initialized
+      ? carVisualMotion.quaternion.clone()
+      : new THREE.Quaternion(
+          chassisBody.quaternion.x,
+          chassisBody.quaternion.y,
+          chassisBody.quaternion.z,
+          chassisBody.quaternion.w,
+        ),
+    speed: Math.abs(vehicleDynamics.signedSpeed),
+  };
+}
+
+function getSpectatedRemotePlayer() {
+  if (raceSession.mode !== "spectator" || !isActiveRaceSession()) return null;
+
+  const unfinishedParticipantIds = raceSession.participants
+    .filter((participant) => !participant.finished)
+    .map((participant) => participant.id);
+
+  for (const id of unfinishedParticipantIds) {
+    const remote = remotePlayers.get(id);
+    if (remote) return remote;
+  }
+
+  return [...remotePlayers.values()].find((remote) => remote.courseId === selectedCourseId) ?? null;
 }
 
 function updateLap() {
@@ -5550,6 +5865,8 @@ function finishRace(finishTime) {
   message.classList.add("is-visible");
 
   const savedRecord = saveLeaderboardRecord(finishTime);
+  rememberRaceResult(createLocalRaceResult(finishTime));
+  submitRaceFinish(finishTime);
   showResultsOverlay(finishTime, savedRecord);
 }
 
@@ -5610,28 +5927,30 @@ function showResultsOverlay(finishTime, savedRecord) {
   if (resultsCourse) resultsCourse.textContent = activeCourse.name;
   if (resultsPlayer) resultsPlayer.textContent = currentPlayer?.id ?? "GUEST";
   if (resultsTime) resultsTime.textContent = formatTime(finishTime);
-  renderLeaderboard(savedRecord?.record?.key ?? currentPlayer?.key ?? null);
+  renderRaceResults(savedRecord?.record?.key ?? currentPlayer?.key ?? multiplayer.selfId ?? null);
 }
 
 function hideResultsOverlay() {
   if (resultsOverlay) resultsOverlay.hidden = true;
 }
 
-function renderLeaderboard(playerKey) {
+function renderRaceResults(playerKey) {
   if (!leaderboardBody) return;
 
   leaderboardBody.replaceChildren();
-  const records = getCourseLeaderboard();
+  const records = raceSession.results.length ? [...raceSession.results].sort(compareRaceResults) : [createLocalRaceResult(0)].filter(
+    (record) => record.time > 0,
+  );
   if (!records.length) {
     const empty = document.createElement("div");
     empty.className = "leaderboard-empty";
-    empty.textContent = "No records yet.";
+    empty.textContent = "No finish times yet.";
     leaderboardBody.append(empty);
     return;
   }
 
   const leaderTime = records[0].time;
-  const playerIndex = records.findIndex((record) => record.key === playerKey);
+  const playerIndex = records.findIndex((record) => record.playerId === playerKey || record.id === playerKey);
   const visibleRecords = records.slice(0, 8);
 
   if (playerIndex >= 8) {
@@ -5642,7 +5961,7 @@ function renderLeaderboard(playerKey) {
     const rank = records.indexOf(record) + 1;
     const row = document.createElement("div");
     row.className = "leaderboard-row";
-    row.classList.toggle("is-player", record.key === playerKey);
+    row.classList.toggle("is-player", record.playerId === playerKey || record.id === playerKey);
 
     const rankCell = document.createElement("span");
     const idCell = document.createElement("span");
@@ -5651,7 +5970,7 @@ function renderLeaderboard(playerKey) {
     const gap = record.time - leaderTime;
 
     rankCell.textContent = `#${rank}`;
-    idCell.textContent = record.id;
+    idCell.textContent = record.displayName;
     timeCell.textContent = formatTime(record.time);
     gapCell.textContent = gap <= 0 ? "--" : `+${formatTime(gap)}`;
     row.append(rankCell, idCell, timeCell, gapCell);
@@ -5742,16 +6061,41 @@ function formatTime(ms) {
   return `${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
 }
 
-function resetCar() {
+function getRaceStartTransform(gridSlot = 0, gridTotal = 1) {
+  const total = Math.max(1, Math.floor(gridTotal));
+  const columns = Math.max(1, Math.min(total, Math.floor(START_GRID_WIDTH / RACE_GRID_SPACING)));
+  const slot = THREE.MathUtils.clamp(Math.floor(gridSlot), 0, Math.max(total - 1, 0));
+  const row = Math.floor(slot / columns);
+  const col = slot % columns;
+  const rowCount = Math.min(columns, total - row * columns);
+  const lateralOffset = (col - (rowCount - 1) / 2) * RACE_GRID_SPACING;
+  const backwardOffset = row * RACE_GRID_ROW_SPACING;
+  const point = START_SPAWN_POINT.clone()
+    .addScaledVector(START_GATE.normal, lateralOffset)
+    .addScaledVector(START_GATE.tangent, -backwardOffset);
+  const groundY = getTrackElevation(point.x, point.y);
+
+  return {
+    position: new CANNON.Vec3(
+      point.x,
+      groundY + WHEEL_RADIUS + SUSPENSION_REST_LENGTH - WHEEL_CONNECTION_Y + 0.02,
+      point.y,
+    ),
+    yaw: START_YAW,
+  };
+}
+
+function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.gridTotal ?? 1) {
+  const startTransform = getRaceStartTransform(gridSlot, gridTotal);
   vehicle.reset();
   vehiclePhysics = vehicle;
-  chassisBody.position.copy(START_POSITION);
-  chassisBody.quaternion.setFromEuler(0, START_YAW, 0);
+  chassisBody.position.copy(startTransform.position);
+  chassisBody.quaternion.setFromEuler(0, startTransform.yaw, 0);
   chassisBody.velocity.set(0, 0, 0);
   chassisBody.angularVelocity.set(0, 0, 0);
   chassisBody.force.set(0, 0, 0);
   chassisBody.torque.set(0, 0, 0);
-  const startPoint = new THREE.Vector2(START_POSITION.x, START_POSITION.z);
+  const startPoint = new THREE.Vector2(startTransform.position.x, startTransform.position.z);
   previousStartGateSide = getGateSide(START_GATE, startPoint);
   previousFinishGateSide = getGateSide(FINISH_GATE, startPoint);
   steering = 0;
@@ -5827,6 +6171,7 @@ function syncPauseButton() {
 function setPaused(value) {
   if (raceCountdownActive) return;
   if (raceFinished) return;
+  if (raceSession.mode === "spectator" && isActiveRaceSession()) return;
   if (paused === value) return;
 
   paused = value;
