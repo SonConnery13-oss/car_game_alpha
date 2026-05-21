@@ -7,7 +7,7 @@ export const MAP_3 = {
   environment: "mountain",
   loop: false,
   samples: 740,
-  roadWidth: 10.6,
+  roadWidth: 13.6,
   shoulderWidth: 4.3,
   spawnOffset: 3,
   minCompletionTime: 11000,
