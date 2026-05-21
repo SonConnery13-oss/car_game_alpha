@@ -189,9 +189,10 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     highSpeedGripLossStart: 108 / 3.6,
     highSpeedGripLossEnd: 172 / 3.6,
     highSpeedGripScale: 0.68,
-    boostTorqueMultiplier: 0.34,
-    boostForce: 2500,
-    boostGripLoad: 0.08,
+    boostTorqueMultiplier: 0.82,
+    boostForce: 7200,
+    boostGripLoad: 0.14,
+    boostMaxSpeedMultiplier: 1.45,
     accelerationResponse: 20,
     longitudinalForceResponse: 34,
     driveInputRamp: 8.8,
@@ -271,9 +272,10 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     highSpeedGripLossStart: 168 / 3.6,
     highSpeedGripLossEnd: 232 / 3.6,
     highSpeedGripScale: 0.82,
-    boostTorqueMultiplier: 0.46,
-    boostForce: 4300,
-    boostGripLoad: 0.12,
+    boostTorqueMultiplier: 0.98,
+    boostForce: 10500,
+    boostGripLoad: 0.2,
+    boostMaxSpeedMultiplier: 1.5,
     accelerationResponse: 18,
     longitudinalForceResponse: 30,
     driveInputRamp: 5.9,
@@ -353,9 +355,10 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     highSpeedGripLossStart: 138 / 3.6,
     highSpeedGripLossEnd: 204 / 3.6,
     highSpeedGripScale: 0.74,
-    boostTorqueMultiplier: 0.4,
-    boostForce: 3400,
-    boostGripLoad: 0.1,
+    boostTorqueMultiplier: 0.9,
+    boostForce: 8800,
+    boostGripLoad: 0.16,
+    boostMaxSpeedMultiplier: 1.47,
     accelerationResponse: 15,
     longitudinalForceResponse: 24,
     driveInputRamp: 4.5,
@@ -1189,9 +1192,10 @@ export class VehiclePhysics {
   getBoostPower() {
     if (!this.input.boost || this.input.boostPower <= 0 || this.gear < 0) return 0;
 
+    const boostMaxSpeedMultiplier = this.config.boostMaxSpeedMultiplier ?? 1.22;
     const speedFade = 1 - smoothstep(
-      this.config.maxForwardSpeed * 1.02,
-      this.config.maxForwardSpeed * 1.22,
+      this.config.maxForwardSpeed * 1.08,
+      this.config.maxForwardSpeed * boostMaxSpeedMultiplier,
       Math.abs(this.signedSpeed),
     );
     return clamp(this.input.boostPower * speedFade, 0, 1);

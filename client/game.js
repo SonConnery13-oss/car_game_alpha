@@ -5047,7 +5047,7 @@ function selectCar(carId) {
   vehiclePhysicsConfig = getVehiclePhysicsConfig(selectedCarId);
   vehicle.configure(vehiclePhysicsConfig);
   vehiclePhysics = vehicle;
-  resetDriftBoost();
+  resetDriftBoost(true);
   replaceCarMesh();
   applyVehicleTuning();
   updateWheelStyle();
@@ -5496,8 +5496,8 @@ function updateDriftBoost(delta, input) {
   }
 }
 
-function resetDriftBoost() {
-  driftBoostCharge = 0;
+function resetDriftBoost(fill = false) {
+  driftBoostCharge = fill && isDriftBoostCar() ? 1 : 0;
   boostAmount = 0;
 }
 
@@ -6552,7 +6552,7 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   tireSlip = 0;
   driftAmount = 0;
   driftScore = 0;
-  resetDriftBoost();
+  resetDriftBoost(true);
   if (driftLabelSprite) {
     driftLabelSprite.material.opacity = 0;
     driftLabelSprite.visible = false;
