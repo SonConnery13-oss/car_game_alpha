@@ -310,16 +310,22 @@ const wallSparkParticles = [];
 const tireMarkSegments = [];
 const brakeLightTrails = [];
 const boostSpeedStreaks = [];
+const vehicleCollisionDebris = [];
 const WALL_SPARK_GEOMETRY = new THREE.SphereGeometry(0.035, 6, 4);
 const WALL_SPARK_COLORS = [0xfff1a6, 0xffc247, 0xff742f];
 const TIRE_MARK_GEOMETRY = new THREE.BoxGeometry(0.34, 0.012, 1.08);
 const BRAKE_TRAIL_GEOMETRY = new THREE.BoxGeometry(0.13, 0.04, 1);
 const BOOST_STREAK_GEOMETRY = new THREE.BoxGeometry(0.045, 0.045, 2.7);
+const VEHICLE_DEBRIS_GEOMETRY = new THREE.BoxGeometry(0.34, 0.1, 0.22);
 const BOOST_STREAK_COLORS = [0x69c8ff, 0xa7ff5b, 0xff4fd8, 0xffd45a, 0xffffff];
+const VEHICLE_DEBRIS_COLORS = [0xe8edf1, 0x101214, 0xffd200, 0xc83228, 0x2f3438];
 const TIRE_MARK_HOLD_SECONDS = 5;
 const TIRE_MARK_FADE_SECONDS = 3;
 const BRAKE_TRAIL_HOLD_SECONDS = 5;
 const BRAKE_TRAIL_FADE_SECONDS = 2.2;
+const VEHICLE_COLLISION_RADIUS = 2.35;
+const VEHICLE_COLLISION_COOLDOWN_MS = 260;
+const VEHICLE_DEBRIS_LIFE_SECONDS = 5;
 const MULTIPLAYER_SEND_INTERVAL = 1000 / 20;
 const REMOTE_INTERPOLATION_MS = 140;
 let lastWallSparkAt = 0;
@@ -327,6 +333,7 @@ let tireMarkAccumulator = 0;
 let brakeTrailAccumulator = 0;
 let boostStreakAccumulator = 0;
 const brakeTrailLastPoints = [null, null];
+const lastVehicleCollisionAt = new Map();
 const vehicleDynamics = {
   braking: false,
   throttle: false,
@@ -4767,6 +4774,7 @@ function removeRemotePlayer(id) {
   scene.remove(remote.mesh);
   disposeObject3D(remote.mesh);
   remotePlayers.delete(id);
+  lastVehicleCollisionAt.delete(id);
   updateMultiplayerRoomStatus();
   updateMiniMap();
 }
@@ -5469,6 +5477,7 @@ function updateControls(delta) {
   vehicle.updatePhysics(delta, drivingInput);
   syncVehicleDynamicsFromPhysics(delta);
   updateDriftBoost(delta, drivingInput);
+  handleMultiplayerVehicleCollisions();
 
   if (chassisBody.position.y < -5) {
     resetCar();
@@ -5629,6 +5638,7 @@ function updateVehicleMeshes(delta) {
   updateBoostSpeedStreaks(delta);
   updateDriftSmoke(delta);
   updateWallSparks(delta);
+  updateVehicleCollisionDebris(delta);
   updateDriftLabel(delta);
 }
 
@@ -6273,6 +6283,146 @@ function updateWallSparks(delta) {
       wallSparkParticles.splice(i, 1);
     }
   }
+}
+
+function handleMultiplayerVehicleCollisions() {
+  if (paused || remotePlayers.size === 0) return;
+
+  const localPosition = new THREE.Vector3(chassisBody.position.x, chassisBody.position.y, chassisBody.position.z);
+  const localVelocity = new THREE.Vector3(chassisBody.velocity.x, 0, chassisBody.velocity.z);
+  const now = performance.now();
+
+  for (const remote of remotePlayers.values()) {
+    if (remote.courseId !== selectedCourseId) continue;
+
+    const offset = localPosition.clone().sub(remote.renderPosition);
+    offset.y = 0;
+    const distance = offset.length();
+    if (distance <= 0.001 || distance >= VEHICLE_COLLISION_RADIUS) continue;
+
+    const normal = offset.multiplyScalar(1 / distance);
+    const remoteVelocity = remote.velocity.clone();
+    remoteVelocity.y = 0;
+    const relativeVelocity = localVelocity.clone().sub(remoteVelocity);
+    const closingSpeed = Math.max(0, -relativeVelocity.dot(normal));
+    const penetration = VEHICLE_COLLISION_RADIUS - distance;
+    const impulse = penetration * 5.8 + closingSpeed * 0.72 + 0.65;
+
+    chassisBody.position.x += normal.x * penetration * 0.36;
+    chassisBody.position.z += normal.z * penetration * 0.36;
+    chassisBody.velocity.x += normal.x * impulse;
+    chassisBody.velocity.z += normal.z * impulse;
+    const yawDirection = Math.sign(normal.x * vehicleDynamics.lastForward.z - normal.z * vehicleDynamics.lastForward.x) || 1;
+    chassisBody.angularVelocity.y += yawDirection * THREE.MathUtils.clamp(impulse * 0.055, 0.04, 0.48);
+    chassisBody.wakeUp();
+
+    const lastHitAt = lastVehicleCollisionAt.get(remote.id) ?? 0;
+    if (now - lastHitAt < VEHICLE_COLLISION_COOLDOWN_MS || (closingSpeed < 1.3 && penetration < 0.24)) continue;
+
+    const contactPoint = remote.renderPosition.clone().lerp(localPosition, 0.5);
+    contactPoint.y = Math.max(chassisBody.position.y, remote.renderPosition.y) + 0.48;
+    const cannonNormal = new CANNON.Vec3(normal.x, 0, normal.z);
+    const impact = Math.max(4.5, closingSpeed + penetration * 9);
+    emitVehicleCollisionEffects(contactPoint, cannonNormal, impact, remote);
+    lastVehicleCollisionAt.set(remote.id, now);
+  }
+}
+
+function emitVehicleCollisionEffects(point, normal, impact, remote) {
+  const tangentSpeed = impact * 0.36;
+  emitWallSparks(point, normal, tangentSpeed, impact);
+  emitDetachedVehicleParts(point, normal, impact, remote);
+}
+
+function emitDetachedVehicleParts(point, normal, impact, remote) {
+  const normalVector = new THREE.Vector3(normal.x, normal.y, normal.z);
+  if (normalVector.lengthSq() < 0.0001) normalVector.set(0, 0, 1);
+  normalVector.normalize();
+  const right = getHorizontalVehicleRight();
+  const colors = getVehicleDebrisColors(selectedCarId, remote?.carId);
+  const count = THREE.MathUtils.clamp(Math.floor(impact * 0.65), 4, 11);
+
+  for (let i = 0; i < count; i += 1) {
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const part = new THREE.Mesh(
+      VEHICLE_DEBRIS_GEOMETRY,
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.48,
+        metalness: 0.32,
+        transparent: true,
+        opacity: 1,
+      }),
+    );
+    part.position.copy(point);
+    part.position.addScaledVector(normalVector, 0.18 + Math.random() * 0.24);
+    part.position.addScaledVector(right, (Math.random() - 0.5) * 0.72);
+    part.scale.set(
+      THREE.MathUtils.lerp(0.55, 1.35, Math.random()),
+      THREE.MathUtils.lerp(0.45, 1.15, Math.random()),
+      THREE.MathUtils.lerp(0.5, 1.4, Math.random()),
+    );
+    part.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    part.castShadow = true;
+    part.userData.life = VEHICLE_DEBRIS_LIFE_SECONDS;
+    part.userData.maxLife = VEHICLE_DEBRIS_LIFE_SECONDS;
+    part.userData.velocity = normalVector
+      .clone()
+      .multiplyScalar(1.5 + Math.random() * 4.2 + impact * 0.11)
+      .addScaledVector(right, (Math.random() - 0.5) * 4.4);
+    part.userData.velocity.y = 1.4 + Math.random() * 3.2;
+    part.userData.spin = new THREE.Vector3(
+      (Math.random() - 0.5) * 8,
+      (Math.random() - 0.5) * 10,
+      (Math.random() - 0.5) * 8,
+    );
+    vehicleCollisionDebris.push(part);
+    scene.add(part);
+  }
+
+  trimEffectArray(vehicleCollisionDebris, 80);
+}
+
+function getVehicleDebrisColors(localCarId, remoteCarId) {
+  const colors = [...VEHICLE_DEBRIS_COLORS];
+  const carAccent = {
+    ae86: [0xf2f4ee, 0x111315, 0x2b68d8],
+    rx7fd: [0xffd200, 0x111315, 0xd6d8d4],
+    rx7fc: [0xf2f2ee, 0x24272a, 0x111315],
+    amg: [0x14181a, 0x8ee337, 0x3c403d],
+    gt3: [0xe7eef1, 0xc83228, 0x202426],
+  };
+  for (const carId of [localCarId, remoteCarId]) {
+    if (carAccent[carId]) colors.push(...carAccent[carId]);
+  }
+  return colors;
+}
+
+function updateVehicleCollisionDebris(delta) {
+  for (let i = vehicleCollisionDebris.length - 1; i >= 0; i -= 1) {
+    const part = vehicleCollisionDebris[i];
+    part.userData.life -= delta;
+    part.userData.velocity.y -= 7.8 * delta;
+    part.position.addScaledVector(part.userData.velocity, delta);
+    part.rotation.x += part.userData.spin.x * delta;
+    part.rotation.y += part.userData.spin.y * delta;
+    part.rotation.z += part.userData.spin.z * delta;
+
+    const fade = THREE.MathUtils.clamp(part.userData.life / 1.1, 0, 1);
+    part.material.opacity = fade;
+
+    if (part.userData.life <= 0) {
+      disposeEffectMesh(part);
+      vehicleCollisionDebris.splice(i, 1);
+    }
+  }
+}
+
+function clearVehicleCollisionDebris() {
+  for (const part of vehicleCollisionDebris.splice(0)) {
+    disposeEffectMesh(part);
+  }
+  lastVehicleCollisionAt.clear();
 }
 
 function createDriftLabelSprite() {
@@ -7008,6 +7158,7 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   for (const streak of boostSpeedStreaks.splice(0)) {
     disposeEffectMesh(streak);
   }
+  clearVehicleCollisionDebris();
   lastWallSparkAt = 0;
   tireMarkAccumulator = 0;
   resetBrakeTrailAnchors();
