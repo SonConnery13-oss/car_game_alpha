@@ -5935,15 +5935,17 @@ function emitBoostSpeedStreaks(delta) {
     return;
   }
 
-  boostStreakAccumulator += delta * THREE.MathUtils.lerp(26, 66, boostAmount);
+  boostStreakAccumulator += delta * THREE.MathUtils.lerp(34, 92, boostAmount);
   let emitted = 0;
-  while (boostStreakAccumulator >= 1 && emitted < 8) {
+  while (boostStreakAccumulator >= 1 && emitted < 10) {
     boostStreakAccumulator -= 1;
     createBoostSpeedStreak(false);
     if (Math.random() < 0.72) createBoostSpeedStreak(true);
+    if (Math.random() < 0.9) createBoostScreenStreak();
+    if (Math.random() < 0.42) createBoostScreenStreak(true);
     emitted += 1;
   }
-  trimEffectArray(boostSpeedStreaks, 280);
+  trimEffectArray(boostSpeedStreaks, 440);
 }
 
 function createBoostSpeedStreak(background = false) {
@@ -5953,16 +5955,16 @@ function createBoostSpeedStreak(background = false) {
   const color = BOOST_STREAK_COLORS[Math.floor(Math.random() * BOOST_STREAK_COLORS.length)];
   const sideSign = Math.random() < 0.5 ? -1 : 1;
   const side = background
-    ? sideSign * THREE.MathUtils.lerp(4.5, 18, Math.random())
+    ? sideSign * THREE.MathUtils.lerp(5.5, 32, Math.random())
     : (Math.random() - 0.5) * 2.9;
   const longitudinal = background
-    ? THREE.MathUtils.lerp(-14, 24, Math.random())
+    ? THREE.MathUtils.lerp(-28, 58, Math.random())
     : THREE.MathUtils.lerp(-2.3, 1.6, Math.random());
   const height = background
-    ? THREE.MathUtils.lerp(1.1, 5.6, Math.random())
+    ? THREE.MathUtils.lerp(0.7, 12, Math.random())
     : THREE.MathUtils.lerp(0.32, 1.3, Math.random());
   const lengthScale = background
-    ? THREE.MathUtils.lerp(2.2, 5.4, boostAmount)
+    ? THREE.MathUtils.lerp(3.1, 7.4, boostAmount)
     : THREE.MathUtils.lerp(0.85, 2.25, boostAmount);
 
   const streak = new THREE.Mesh(
@@ -5986,6 +5988,7 @@ function createBoostSpeedStreak(background = false) {
   streak.scale.setScalar(background ? THREE.MathUtils.lerp(1.15, 1.85, Math.random()) : 1);
   streak.scale.z = lengthScale;
   streak.renderOrder = 13;
+  streak.userData.initialOpacity = streak.material.opacity;
   streak.userData.life = background
     ? THREE.MathUtils.lerp(0.46, 0.72, Math.random())
     : THREE.MathUtils.lerp(0.28, 0.48, Math.random());
@@ -6003,12 +6006,75 @@ function createBoostSpeedStreak(background = false) {
   scene.add(streak);
 }
 
+function createBoostScreenStreak(farLayer = false) {
+  const forward = getHorizontalVehicleForward();
+  const right = getHorizontalVehicleRight();
+  const cameraForward = new THREE.Vector3();
+  camera.getWorldDirection(cameraForward);
+  const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
+  const color = BOOST_STREAK_COLORS[Math.floor(Math.random() * BOOST_STREAK_COLORS.length)];
+  const depth = farLayer
+    ? THREE.MathUtils.lerp(42, 118, Math.random())
+    : THREE.MathUtils.lerp(16, 74, Math.random());
+  const visibleHeight = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5) * depth;
+  const visibleWidth = visibleHeight * camera.aspect;
+  const screenX = (Math.random() - 0.5) * visibleWidth * (farLayer ? 1.35 : 1.18);
+  const verticalBias = Math.random() < 0.58 ? THREE.MathUtils.lerp(-0.48, 0.04, Math.random()) : THREE.MathUtils.lerp(0.04, 0.62, Math.random());
+  const screenY = verticalBias * visibleHeight;
+  const lengthScale = farLayer
+    ? THREE.MathUtils.lerp(4.6, 10.5, boostAmount)
+    : THREE.MathUtils.lerp(2.6, 7.8, boostAmount);
+
+  const streak = new THREE.Mesh(
+    BOOST_STREAK_GEOMETRY,
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: farLayer
+        ? THREE.MathUtils.lerp(0.16, 0.42, boostAmount)
+        : THREE.MathUtils.lerp(0.24, 0.62, boostAmount),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  streak.position
+    .copy(camera.position)
+    .addScaledVector(cameraForward, depth)
+    .addScaledVector(cameraRight, screenX)
+    .addScaledVector(cameraUp, screenY);
+  streak.position.addScaledVector(right, (Math.random() - 0.5) * (farLayer ? 9 : 5));
+  streak.quaternion.copy(getYawQuaternion(forward));
+  streak.rotation.y += (Math.random() - 0.5) * 0.14;
+  streak.scale.set(
+    farLayer ? THREE.MathUtils.lerp(1.4, 2.4, Math.random()) : THREE.MathUtils.lerp(1, 1.65, Math.random()),
+    1,
+    lengthScale,
+  );
+  streak.renderOrder = 13;
+  streak.userData.initialOpacity = streak.material.opacity;
+  streak.userData.life = farLayer
+    ? THREE.MathUtils.lerp(0.52, 0.9, Math.random())
+    : THREE.MathUtils.lerp(0.36, 0.68, Math.random());
+  streak.userData.maxLife = streak.userData.life;
+  streak.userData.velocity = forward
+    .clone()
+    .multiplyScalar(-(42 + Math.random() * 74 + speedAbs * (farLayer ? 0.88 : 0.72)))
+    .addScaledVector(right, (Math.random() - 0.5) * (farLayer ? 14 : 8));
+
+  boostSpeedStreaks.push(streak);
+  scene.add(streak);
+}
+
 function updateBoostSpeedStreaks(delta) {
   for (let i = boostSpeedStreaks.length - 1; i >= 0; i -= 1) {
     const streak = boostSpeedStreaks[i];
     streak.userData.life -= delta;
     streak.position.addScaledVector(streak.userData.velocity, delta);
-    streak.material.opacity = Math.max(0, streak.userData.life / streak.userData.maxLife) * 0.82;
+    streak.material.opacity =
+      Math.max(0, streak.userData.life / streak.userData.maxLife) *
+      (streak.userData.initialOpacity ?? 0.82);
     streak.scale.z *= 1 + delta * 2.4;
 
     if (streak.userData.life <= 0) {
