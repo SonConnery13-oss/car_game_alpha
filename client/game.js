@@ -116,6 +116,8 @@ const VISUAL_SUSPENSION = {
   brakeDive: 0.032,
   throttleSquat: 0.014,
   steeringRoll: 0.07,
+  driftRoll: 0.046,
+  handbrakePitch: 0.018,
   roadShake: 0,
   landingKick: 0.02,
   wheelResponse: 52,
@@ -339,8 +341,14 @@ const vehicleDynamics = {
   braking: false,
   throttle: false,
   reverse: false,
+  handbrake: false,
   grounded: false,
   signedSpeed: 0,
+  lateralVelocity: 0,
+  slipAngle: 0,
+  driftFactor: 0,
+  rearGrip: 1,
+  frontGrip: 1,
   preStepVelocityY: 0,
   airborneTime: 0,
   airborneFallSpeed: 0,
@@ -5554,14 +5562,24 @@ function syncVehicleDynamicsFromPhysics(delta) {
   steering = vehicle.steeringAngle;
   driveInput = vehicle.driveInput;
   tireSlip = THREE.MathUtils.clamp(vehicle.averageSlip, 0, 1.6);
-  driftAmount = THREE.MathUtils.clamp((vehicle.averageSlip - 0.14) * 0.85, 0, 1);
+  driftAmount = THREE.MathUtils.clamp(
+    Math.max((vehicle.averageSlip - 0.14) * 0.85, vehicle.driftFactor ?? 0),
+    0,
+    1,
+  );
   tractionGrip = THREE.MathUtils.clamp(1 - Math.max(0, vehicle.averageSlip - 0.45) * 0.32, 0.46, 1);
 
   vehicleDynamics.braking = vehicle.brake > 0.05 && Math.abs(signedSpeed) > 0.8;
   vehicleDynamics.throttle = Math.abs(vehicle.driveInput) > 0.05;
   vehicleDynamics.reverse = vehicle.gear < 0 && vehicle.driveInput < -0.05;
+  vehicleDynamics.handbrake = vehicle.handbrakeActive;
   vehicleDynamics.grounded = grounded;
   vehicleDynamics.signedSpeed = signedSpeed;
+  vehicleDynamics.lateralVelocity = vehicle.lateralVelocity ?? vehicle.lateralSpeed ?? 0;
+  vehicleDynamics.slipAngle = vehicle.slipAngle ?? 0;
+  vehicleDynamics.driftFactor = vehicle.driftFactor ?? driftAmount;
+  vehicleDynamics.rearGrip = vehicle.rearGrip ?? 1;
+  vehicleDynamics.frontGrip = vehicle.frontGrip ?? 1;
   vehicleDynamics.airborneTime = grounded ? 0 : vehicleDynamics.airborneTime + delta;
   vehicleDynamics.airborneFallSpeed = grounded
     ? vehicleDynamics.airborneFallSpeed
@@ -6665,6 +6683,18 @@ function updateSuspensionVisual(delta) {
     VISUAL_SUSPENSION.steeringRoll *
     THREE.MathUtils.clamp(speedFactor + Math.abs(driveInput) * 0.34, 0, 1) *
     highSpeedLeanGain;
+  const driftVisual = THREE.MathUtils.clamp(vehicleDynamics.driftFactor ?? driftAmount, 0, 1);
+  const driftDirection = Math.sign(vehicleDynamics.slipAngle || steering || chassisBody.angularVelocity.y);
+  const handbrakePitch =
+    vehicleDynamics.handbrake && driftVisual > 0.04
+      ? VISUAL_SUSPENSION.handbrakePitch * driftVisual * speedFactor
+      : 0;
+  const driftLean =
+    -driftDirection *
+    VISUAL_SUSPENSION.driftRoll *
+    driftVisual *
+    smoothstep(5, 26, speedAbs) *
+    highSpeedLeanGain;
   const time = performance.now() * 0.001;
   const surfaceShake = getSurfaceRipple(chassisBody.position.x + 3.7, chassisBody.position.z - 2.1) * 0.58;
   const roadShake =
@@ -6679,11 +6709,13 @@ function updateSuspensionVisual(delta) {
   const targetPitch =
     (frontCompression - rearCompression) * VISUAL_SUSPENSION.pitchScale +
     brakeDive +
+    handbrakePitch +
     throttleSquat +
     THREE.MathUtils.clamp(chassisBody.angularVelocity.x * 0.018, -0.08, 0.08);
   const targetRoll =
     (leftCompression - rightCompression) * VISUAL_SUSPENSION.rollScale +
     steeringLean +
+    driftLean +
     THREE.MathUtils.clamp(chassisBody.angularVelocity.z * 0.014, -0.07, 0.07);
 
   if (grounded && !visualSuspension.wasGrounded) {
@@ -6783,6 +6815,9 @@ function updateCamera(delta) {
   cameraRig.forward.lerp(horizontalForward, forwardBlend).normalize();
 
   const target = cameraRig.focus.clone().add(up.clone().multiplyScalar(0.78));
+  const cameraRight = new THREE.Vector3(cameraRig.forward.z, 0, -cameraRig.forward.x);
+  if (cameraRight.lengthSq() < 0.0001) cameraRight.set(1, 0, 0);
+  cameraRight.normalize();
 
   let desiredPosition;
   let lookTarget;
@@ -6811,6 +6846,14 @@ function updateCamera(delta) {
     lookTarget = target.clone().addScaledVector(cameraRig.forward, 18).add(up.clone().multiplyScalar(0.08));
   }
 
+  const driftShake = cameraSubject.isLocal ? getHandbrakeCameraShake(speedFactor) : 0;
+  if (driftShake > 0) {
+    const time = performance.now() * 0.001;
+    desiredPosition.addScaledVector(cameraRight, Math.sin(time * 58) * driftShake);
+    desiredPosition.y += Math.sin(time * 83) * driftShake * 0.46;
+    lookTarget.addScaledVector(cameraRight, Math.cos(time * 47) * driftShake * 0.34);
+  }
+
   const positionBlend = 1 - Math.exp(-(cameraMode === 0 ? 6.4 + speedFactor * 4.8 : 9.5) * delta);
   const lookBlend = 1 - Math.exp(-(cameraMode === 0 ? 8.4 + speedFactor * 5.2 : 11.5) * delta);
   camera.position.lerp(desiredPosition, positionBlend);
@@ -6820,6 +6863,13 @@ function updateCamera(delta) {
   camera.lookAt(cameraRig.lookTarget);
 }
 
+function getHandbrakeCameraShake(speedFactor) {
+  if (!vehicleDynamics.handbrake || !vehicleDynamics.grounded) return 0;
+
+  const driftShake = THREE.MathUtils.clamp(vehicleDynamics.driftFactor * speedFactor, 0, 1);
+  return THREE.MathUtils.lerp(0, 0.13, driftShake);
+}
+
 function getCameraSubject() {
   const spectatedRemote = getSpectatedRemotePlayer();
   if (spectatedRemote) {
@@ -6827,6 +6877,7 @@ function getCameraSubject() {
       position: spectatedRemote.renderPosition.clone(),
       quaternion: spectatedRemote.renderQuaternion.clone(),
       speed: spectatedRemote.velocity.length(),
+      isLocal: false,
     };
   }
 
@@ -6843,6 +6894,7 @@ function getCameraSubject() {
           chassisBody.quaternion.w,
         ),
     speed: Math.abs(vehicleDynamics.signedSpeed),
+    isLocal: true,
   };
 }
 
@@ -7104,6 +7156,8 @@ function updatePhysicsDebug(kmh) {
       <span>long accel</span><span>${vehiclePhysics.longitudinalAcceleration.toFixed(2)} m/s2</span>
       <span>lat accel</span><span>${vehiclePhysics.lateralAcceleration.toFixed(2)} m/s2</span>
       <span>front/rear grip</span><span>${vehiclePhysics.frontGripUsage.toFixed(2)} / ${vehiclePhysics.rearGripUsage.toFixed(2)}</span>
+      <span>handbrake drift</span><span>${vehiclePhysics.handbrakeDriftFactor.toFixed(2)} / ${vehiclePhysics.rearGrip.toFixed(2)} rear</span>
+      <span>slip angle</span><span>${THREE.MathUtils.radToDeg(vehiclePhysics.slipAngle).toFixed(1)} deg</span>
       <span>drag</span><span>${Math.round(vehiclePhysics.aeroDrag)} N</span>
       <span>boost</span><span>${isDriftBoostCar() ? `${Math.round(driftBoostCharge * 100)}%${boostAmount > 0.02 ? " ON" : ""}` : "n/a"}</span>
     </div>
@@ -7189,8 +7243,14 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   vehicleDynamics.braking = false;
   vehicleDynamics.throttle = false;
   vehicleDynamics.reverse = false;
+  vehicleDynamics.handbrake = false;
   vehicleDynamics.grounded = false;
   vehicleDynamics.signedSpeed = 0;
+  vehicleDynamics.lateralVelocity = 0;
+  vehicleDynamics.slipAngle = 0;
+  vehicleDynamics.driftFactor = 0;
+  vehicleDynamics.rearGrip = 1;
+  vehicleDynamics.frontGrip = 1;
   vehicleDynamics.preStepVelocityY = 0;
   vehicleDynamics.airborneTime = 0;
   vehicleDynamics.airborneFallSpeed = 0;

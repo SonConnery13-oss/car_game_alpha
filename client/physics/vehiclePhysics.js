@@ -15,6 +15,19 @@ const LOCAL_FORWARD = new CANNON.Vec3(0, 0, 1);
 const WORLD_UP = new CANNON.Vec3(0, 1, 0);
 const EPSILON = 0.00001;
 const STEERING_RESPONSE_MULTIPLIER = 1.35;
+const HANDBRAKE_DRIFT_DEFAULTS = {
+  rearGripScale: 0.34,
+  frontGripScale: 0.93,
+  engageRate: 10.5,
+  recoveryRate: 4.6,
+  minSpeed: 4.2,
+  fullSpeed: 18,
+  yawAssist: 1.15,
+  yawDamping: 0.72,
+  spinDamping: 3.15,
+  spinStart: 0.92,
+  spinEnd: 2.25,
+};
 
 export const VEHICLE_PHYSICS_CONFIGS = {
   gt3: {
@@ -538,12 +551,21 @@ export class VehiclePhysics {
     this.rawSteer = 0;
     this.steeringAngle = 0;
     this.driveInput = 0;
+    this.handbrakeActive = false;
+    this.handbrakeDriftFactor = 0;
+    this.handbrakeGripFactor = 0;
+    this.frontGrip = 1;
+    this.rearGrip = 1;
+    this.driftFactor = 0;
+    this.slipAngle = 0;
+    this.yawDamping = 0;
     this.grounded = false;
     this.groundedWheels = 0;
     this.contactRatio = 0;
     this.surfaceGrip = 1;
     this.signedSpeed = 0;
     this.lateralSpeed = 0;
+    this.lateralVelocity = 0;
     this.rawLongitudinalAcceleration = 0;
     this.rawLateralAcceleration = 0;
     this.longitudinalAcceleration = 0;
@@ -592,9 +614,12 @@ export class VehiclePhysics {
     this.updateGearbox(safeDt);
     this.updateSuspension(safeDt);
     this.updateGroundSummary();
+    this.updateHandbrakeDriftState(safeDt);
     this.applyEngineForce(safeDt);
     this.applyBrakeForce(safeDt);
     this.updateTireForces(safeDt);
+    this.updateDriftSummary();
+    this.applyHandbrakeDriftAssist(safeDt);
     this.applySlideStability(safeDt);
     this.applyAeroAndRollingResistance();
     this.updateGroundSummary();
@@ -619,6 +644,8 @@ export class VehiclePhysics {
     const horizontalRight = projectOnPlane(this.right, WORLD_UP);
     this.signedSpeed = this.chassisBody.velocity.dot(horizontalForward);
     this.lateralSpeed = this.chassisBody.velocity.dot(horizontalRight);
+    this.lateralVelocity = this.lateralSpeed;
+    this.slipAngle = clamp(Math.atan2(this.lateralSpeed, Math.abs(this.signedSpeed) + 0.85), -1.2, 1.2);
     this.rawLongitudinalAcceleration = clamp(
       (this.signedSpeed - this.previousForwardSpeed) / dt,
       -42,
@@ -659,6 +686,32 @@ export class VehiclePhysics {
       // points the wheel to the right, so front-wheel visual/force yaw is inverted.
       wheel.steerAngle = wheel.isFront ? -this.steeringAngle : 0;
     }
+  }
+
+  updateHandbrakeDriftState(dt) {
+    const speedAbs = Math.abs(this.signedSpeed);
+    const minSpeed = this.config.handbrakeMinSpeed ?? HANDBRAKE_DRIFT_DEFAULTS.minSpeed;
+    const fullSpeed = this.config.handbrakeFullSpeed ?? HANDBRAKE_DRIFT_DEFAULTS.fullSpeed;
+    const speedDemand = smoothstep(minSpeed, fullSpeed, speedAbs);
+    const target = this.input.handbrake && this.grounded ? speedDemand : 0;
+    const rate =
+      target > this.handbrakeDriftFactor
+        ? this.config.handbrakeEngageRate ?? HANDBRAKE_DRIFT_DEFAULTS.engageRate
+        : this.config.driftRecoveryRate ?? HANDBRAKE_DRIFT_DEFAULTS.recoveryRate;
+
+    this.handbrakeDriftFactor = approach(this.handbrakeDriftFactor, target, rate * dt);
+    this.handbrakeGripFactor = this.handbrakeDriftFactor;
+    this.handbrakeActive = this.input.handbrake || this.handbrakeDriftFactor > 0.035;
+    this.frontGrip = lerp(
+      1,
+      this.config.handbrakeFrontGripScale ?? HANDBRAKE_DRIFT_DEFAULTS.frontGripScale,
+      this.handbrakeDriftFactor,
+    );
+    this.rearGrip = lerp(
+      1,
+      this.config.handbrakeRearGripScale ?? HANDBRAKE_DRIFT_DEFAULTS.rearGripScale,
+      this.handbrakeDriftFactor,
+    );
   }
 
   updateGearbox(dt) {
@@ -820,6 +873,7 @@ export class VehiclePhysics {
       const brakeDriftLateralScale = wheel.isFront
         ? 1
         : lerp(1, this.config.brakeDriftRearLateralScale ?? 0.78, brakeDriftFactor);
+      const handbrakeLateralScale = this.getHandbrakeLateralGripScale(wheel);
       const availableLongitudinal =
         effectiveLoad *
         this.config.tireGrip *
@@ -833,6 +887,7 @@ export class VehiclePhysics {
         this.config.lateralGrip *
         axleLateralScale *
         brakeDriftLateralScale *
+        handbrakeLateralScale *
         surfaceGrip *
         highSpeedGripScale;
 
@@ -974,6 +1029,25 @@ export class VehiclePhysics {
     return wheel.longitudinalForceState;
   }
 
+  getHandbrakeLateralGripScale(wheel) {
+    if (this.handbrakeDriftFactor <= 0.001) return 1;
+
+    const gripTarget = wheel.isFront ? this.frontGrip : this.rearGrip;
+    const steerDemand = clamp(
+      Math.abs(this.steeringAngle) / Math.max((this.config.maxSteerAngle ?? 0.5) * 0.72, 0.08),
+      0,
+      1,
+    );
+    const lateralDemand = smoothstep(0.6, 6.5, Math.abs(wheel.lateralSpeed));
+    const releaseBlend = wheel.isFront
+      ? this.handbrakeDriftFactor * 0.62
+      : this.handbrakeDriftFactor * lerp(0.72, 1, Math.max(steerDemand, lateralDemand));
+
+    // The handbrake mainly unloads rear lateral grip; front grip stays high
+    // so steering can still pull the car through the slide.
+    return lerp(1, gripTarget, releaseBlend);
+  }
+
   applyBrakeForce(dt) {
     const brakePedal = this.gear < 0 && this.signedSpeed < 2.2 ? 0 : this.input.brake;
     const brakeResponse =
@@ -991,9 +1065,13 @@ export class VehiclePhysics {
       let brakeTorque = this.config.brakeForce * this.config.tireRadius * this.brakePressure * axleShare * 0.5 * corneringBrakeScale;
 
       if (this.input.handbrake && !wheel.isFront) {
+        const handbrakeSpeedScale = lerp(0.38, 1, smoothstep(2.5, 12, Math.abs(this.signedSpeed)));
         brakeTorque = Math.max(
           brakeTorque,
-          this.config.brakeForce * this.config.tireRadius * (this.config.handbrakeTorqueScale ?? 0.36),
+          this.config.brakeForce *
+            this.config.tireRadius *
+            (this.config.handbrakeTorqueScale ?? 0.36) *
+            handbrakeSpeedScale,
         );
       }
 
@@ -1025,7 +1103,7 @@ export class VehiclePhysics {
     const speedDemand = smoothstep(6, 28, Math.abs(wheel.forwardSpeed || this.signedSpeed));
     const brakeDemand = Math.max(
       smoothstep(0.12, 0.9, this.brakePressure),
-      this.input.handbrake && this.config.brakeDrift ? 0.82 : 0,
+      this.input.handbrake ? lerp(0.36, 0.82, this.handbrakeDriftFactor) : 0,
     );
     const lateralDemand = clamp(
       Math.abs(wheel.slipAngle) / 0.28 + Math.abs(wheel.lateralSpeed) / 18,
@@ -1063,7 +1141,7 @@ export class VehiclePhysics {
     const lateralDemand = clamp(Math.abs(wheel.slipAngle) / 0.34, 0, 1);
     const brakeDemand = Math.max(
       smoothstep(0.08, 0.85, this.brakePressure),
-      this.input.handbrake && this.config.brakeDrift && !wheel.isFront ? 0.74 : 0,
+      this.input.handbrake && !wheel.isFront ? this.handbrakeDriftFactor * 0.74 : 0,
     );
     const speedDemand = smoothstep(5, 24, Math.abs(wheel.forwardSpeed || this.signedSpeed));
     const reserveDemand = Math.max(lateralDemand, (wheel.isFront ? 0.1 : 0.22) * speedDemand);
@@ -1077,7 +1155,7 @@ export class VehiclePhysics {
   }
 
   getBrakeDriftFactor(wheel) {
-    if (!this.config.brakeDrift || wheel.isFront) return 0;
+    if (wheel.isFront) return 0;
 
     const brakeDemand = Math.max(
       smoothstep(0.12, 0.86, this.brakePressure),
@@ -1091,7 +1169,68 @@ export class VehiclePhysics {
     );
     const lateralDemand = smoothstep(0.8, 7.5, Math.abs(wheel.lateralSpeed));
 
-    return clamp(brakeDemand * speedDemand * lerp(0.34, 1, Math.max(steerDemand, lateralDemand)), 0, 1);
+    const configuredDrift = this.config.brakeDrift
+      ? brakeDemand * speedDemand * lerp(0.34, 1, Math.max(steerDemand, lateralDemand))
+      : 0;
+    const handbrakeDrift =
+      this.handbrakeDriftFactor * lerp(0.46, 1, Math.max(steerDemand, lateralDemand));
+
+    return clamp(Math.max(configuredDrift, handbrakeDrift), 0, 1);
+  }
+
+  updateDriftSummary() {
+    const speedDemand = smoothstep(5, 24, Math.abs(this.signedSpeed));
+    const slipDemand = smoothstep(0.08, 0.52, Math.abs(this.slipAngle));
+    const tireSlipDemand = smoothstep(0.18, 0.92, this.averageSlip);
+
+    this.driftFactor = clamp(
+      Math.max(this.handbrakeDriftFactor * 0.82, slipDemand, tireSlipDemand * 0.72) * speedDemand,
+      0,
+      1,
+    );
+  }
+
+  applyHandbrakeDriftAssist(dt) {
+    const drift = this.handbrakeDriftFactor;
+    const speedDemand = smoothstep(5, 26, Math.abs(this.signedSpeed));
+    if (drift <= 0.001 || speedDemand <= 0.001 || this.groundedWheels <= 0) {
+      this.yawDamping = 0;
+      return;
+    }
+
+    const steerAmount = clamp(
+      Math.abs(this.steeringAngle) / Math.max((this.config.maxSteerAngle ?? 0.5) * 0.68, 0.08),
+      0,
+      1,
+    );
+    const steerDirection = Math.sign(this.steeringAngle || this.rawSteer);
+
+    if (this.input.handbrake && steerDirection !== 0) {
+      const yawAssist =
+        (this.config.handbrakeYawAssist ?? HANDBRAKE_DRIFT_DEFAULTS.yawAssist) *
+        drift *
+        speedDemand *
+        lerp(0.32, 1, steerAmount) *
+        this.contactRatio;
+      this.chassisBody.angularVelocity.y += steerDirection * yawAssist * dt;
+    }
+
+    const yawRate = Math.abs(this.chassisBody.angularVelocity.y);
+    const spinControl = smoothstep(
+      this.config.handbrakeSpinStart ?? HANDBRAKE_DRIFT_DEFAULTS.spinStart,
+      this.config.handbrakeSpinEnd ?? HANDBRAKE_DRIFT_DEFAULTS.spinEnd,
+      yawRate,
+    );
+    const baseDamping = (this.config.handbrakeYawDamping ?? HANDBRAKE_DRIFT_DEFAULTS.yawDamping) * drift;
+    const spinDamping =
+      (this.config.handbrakeSpinDamping ?? HANDBRAKE_DRIFT_DEFAULTS.spinDamping) *
+      spinControl *
+      (0.35 + drift * 0.65);
+
+    // The yaw assist starts the rotation, while this damping catches the car
+    // before it spins too freely into an easy 360.
+    this.yawDamping = (baseDamping + spinDamping) * speedDemand * this.contactRatio;
+    this.chassisBody.angularVelocity.y *= Math.exp(-this.yawDamping * dt);
   }
 
   applySlideStability(dt) {
@@ -1104,12 +1243,15 @@ export class VehiclePhysics {
       smoothstep(5, 28, Math.abs(this.signedSpeed));
     if (slipFactor <= 0.001) return;
 
+    const handbrakeBlend = this.handbrakeDriftFactor * smoothstep(5, 24, Math.abs(this.signedSpeed));
     const brakeBlend = Math.max(
       smoothstep(0.05, 0.85, this.brakePressure),
       this.input.handbrake && this.config.brakeDrift ? 0.86 : 0,
+      handbrakeBlend,
     );
-    const stabilityGain = this.config.brakeDrift
-      ? lerp(1, this.config.brakeSlideStability ?? 0.55, brakeBlend)
+    const driftStabilityTarget = this.config.brakeSlideStability ?? (handbrakeBlend > 0.02 ? 0.52 : 0.65);
+    const stabilityGain = this.config.brakeDrift || handbrakeBlend > 0.02
+      ? lerp(1, driftStabilityTarget, brakeBlend)
       : 1 + brakeBlend * (this.config.brakeSlideStability ?? 0.65);
     const lateralDamping = (this.config.slideLateralDamping ?? 0.7) * stabilityGain;
     const lateralForce = -lateralSpeed * this.config.mass * lateralDamping * slipFactor * this.contactRatio;
