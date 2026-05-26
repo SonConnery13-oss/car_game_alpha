@@ -197,6 +197,20 @@ const CAR_MODELS = {
       visualDampingScale: 0.86,
     },
   },
+  formulaRb22: {
+    name: "Formula RB22",
+    previewClass: "garage-preview-formula",
+    rimColor: 0x11141a,
+    brakeColor: 0xffc23a,
+    tuning: {
+      maxForwardSpeed: 340 / 3.6,
+      visualStiffnessScale: 1.15,
+      visualDampingScale: 1.18,
+      cameraDistanceOffset: 1.1,
+      cameraHeightOffset: -0.55,
+      cameraLookAheadOffset: 4.5,
+    },
+  },
 };
 const DRIFT_BOOST_CAR_IDS = new Set(["ae86", "rx7fd", "rx7fc"]);
 const DRIFT_BOOST_CHARGE_MIN = 0.015;
@@ -2366,13 +2380,97 @@ function modelIdUsesNarrowTire(modelId) {
   return modelId === "ae86" || modelId === "rx7fc";
 }
 
+function getVisualTireRadius(physics, wheelIndex) {
+  if (wheelIndex < 2) return physics.visualFrontTireRadius ?? physics.tireRadius ?? 0.42;
+  return physics.visualRearTireRadius ?? physics.tireRadius ?? 0.42;
+}
+
+function getVisualTireWidth(physics, wheelIndex, modelId) {
+  if (wheelIndex < 2) {
+    return physics.visualFrontTireWidth ?? (modelIdUsesNarrowTire(modelId) ? 0.3 : 0.34);
+  }
+  return physics.visualRearTireWidth ?? physics.visualFrontTireWidth ?? (modelIdUsesNarrowTire(modelId) ? 0.3 : 0.34);
+}
+
 function isDriftBoostCar(carId = selectedCarId) {
   return DRIFT_BOOST_CAR_IDS.has(carId);
 }
 
+function createWheelVisual(physics, wheelIndex, modelId = selectedCarId) {
+  const wheel = new THREE.Group();
+  const wheelMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0c0d0f,
+    roughness: modelId === "formulaRb22" ? 0.5 : 0.66,
+    metalness: 0.08,
+  });
+  const rimMaterial = new THREE.MeshStandardMaterial({
+    color: CAR_MODELS[modelId]?.rimColor ?? 0xc52d22,
+    roughness: modelId === "formulaRb22" ? 0.24 : 0.32,
+    metalness: 0.58,
+  });
+  const brakeMaterial = new THREE.MeshStandardMaterial({
+    color: CAR_MODELS[modelId]?.brakeColor ?? 0xf5bf29,
+    roughness: 0.34,
+    metalness: 0.24,
+  });
+  const hubMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1b1e22,
+    roughness: 0.3,
+    metalness: 0.64,
+  });
+  const tireRadius = getVisualTireRadius(physics, wheelIndex);
+  const tireWidth = getVisualTireWidth(physics, wheelIndex, modelId);
+  const tireGeometry = new THREE.CylinderGeometry(tireRadius, tireRadius, tireWidth, 28);
+  tireGeometry.rotateZ(Math.PI / 2);
+  const rimGeometry = new THREE.CylinderGeometry(tireRadius * 0.72, tireRadius * 0.72, tireWidth + 0.02, 28);
+  rimGeometry.rotateZ(Math.PI / 2);
+  const brakeGeometry = new THREE.CylinderGeometry(tireRadius * 0.52, tireRadius * 0.52, 0.05, 24);
+  brakeGeometry.rotateZ(Math.PI / 2);
+  const hubGeometry = new THREE.CylinderGeometry(tireRadius * 0.28, tireRadius * 0.28, tireWidth + 0.05, 16);
+  hubGeometry.rotateZ(Math.PI / 2);
+
+  const tire = new THREE.Mesh(tireGeometry, wheelMaterial);
+  const rim = new THREE.Mesh(rimGeometry, rimMaterial);
+  const brake = new THREE.Mesh(brakeGeometry, brakeMaterial);
+  const hub = new THREE.Mesh(hubGeometry, hubMaterial);
+  const visibleFaceOffset = wheelIndex % 2 === 0 ? -tireWidth * 0.56 : tireWidth * 0.56;
+
+  tire.name = "wheelTire";
+  rim.name = "wheelRim";
+  brake.name = "wheelBrake";
+  hub.name = "wheelHub";
+  rim.position.x = visibleFaceOffset * 0.42;
+  brake.position.x = visibleFaceOffset * 0.72;
+  hub.position.x = visibleFaceOffset * 0.46;
+  tire.castShadow = true;
+  rim.castShadow = true;
+  brake.castShadow = true;
+  hub.castShadow = true;
+
+  for (let spokeIndex = 0; spokeIndex < 10; spokeIndex += 1) {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, tireRadius), rimMaterial);
+    spoke.name = "wheelSpoke";
+    spoke.position.x = visibleFaceOffset;
+    spoke.rotation.x = (spokeIndex / 10) * Math.PI * 2;
+    spoke.castShadow = true;
+    wheel.add(spoke);
+  }
+
+  const caliper = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.24, 0.1), brakeMaterial);
+  caliper.name = "wheelCaliper";
+  caliper.position.set(visibleFaceOffset * 1.06, 0.18, -0.08);
+  caliper.castShadow = true;
+  wheel.add(tire, brake, rim, hub, caliper);
+  scene.add(wheel);
+  return wheel;
+}
+
 function createVehicle() {
   const physics = getActivePhysicsConfig();
-  const chassisShape = new CANNON.Box(new CANNON.Vec3(1.16, 0.42, 2.22));
+  const chassisHalfExtents = physics.chassisHalfExtents ?? { x: 1.16, y: 0.42, z: 2.22 };
+  const chassisShape = new CANNON.Box(
+    new CANNON.Vec3(chassisHalfExtents.x, chassisHalfExtents.y, chassisHalfExtents.z),
+  );
   const chassisBody = new CANNON.Body({
     mass: physics.mass,
     material: carMaterial,
@@ -2400,80 +2498,18 @@ function createVehicle() {
   const carGroup = createCarMesh(selectedCarId);
   scene.add(carGroup);
 
-  const wheelMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0c0d0f,
-    roughness: 0.66,
-    metalness: 0.08,
-  });
-  const rimMaterial = new THREE.MeshStandardMaterial({
-    color: CAR_MODELS[selectedCarId]?.rimColor ?? 0xc52d22,
-    roughness: 0.32,
-    metalness: 0.58,
-  });
-  const brakeMaterial = new THREE.MeshStandardMaterial({
-    color: 0xf5bf29,
-    roughness: 0.34,
-    metalness: 0.24,
-  });
-  const hubMaterial = new THREE.MeshStandardMaterial({
-    color: 0x1b1e22,
-    roughness: 0.3,
-    metalness: 0.64,
-  });
-
   for (let i = 0; i < vehicle.wheelInfos.length; i += 1) {
-    const wheel = new THREE.Group();
-    const tireRadius = physics.tireRadius ?? 0.42;
-    const tireWidth = modelIdUsesNarrowTire(selectedCarId) ? 0.3 : 0.34;
-    const tireGeometry = new THREE.CylinderGeometry(tireRadius, tireRadius, tireWidth, 24);
-    tireGeometry.rotateZ(Math.PI / 2);
-    const rimGeometry = new THREE.CylinderGeometry(tireRadius * 0.72, tireRadius * 0.72, tireWidth + 0.02, 28);
-    rimGeometry.rotateZ(Math.PI / 2);
-    const brakeGeometry = new THREE.CylinderGeometry(tireRadius * 0.52, tireRadius * 0.52, 0.05, 24);
-    brakeGeometry.rotateZ(Math.PI / 2);
-    const hubGeometry = new THREE.CylinderGeometry(tireRadius * 0.28, tireRadius * 0.28, tireWidth + 0.05, 16);
-    hubGeometry.rotateZ(Math.PI / 2);
-
-    const tire = new THREE.Mesh(tireGeometry, wheelMaterial);
-    const rim = new THREE.Mesh(rimGeometry, rimMaterial);
-    const brake = new THREE.Mesh(brakeGeometry, brakeMaterial);
-    const hub = new THREE.Mesh(hubGeometry, hubMaterial);
-    const visibleFaceOffset = i % 2 === 0 ? -0.19 : 0.19;
-
-    tire.name = "wheelTire";
-    rim.name = "wheelRim";
-    brake.name = "wheelBrake";
-    hub.name = "wheelHub";
-    rim.position.x = visibleFaceOffset * 0.42;
-    brake.position.x = visibleFaceOffset * 0.72;
-    hub.position.x = visibleFaceOffset * 0.46;
-    tire.castShadow = true;
-    rim.castShadow = true;
-    brake.castShadow = true;
-    hub.castShadow = true;
-
-    for (let spokeIndex = 0; spokeIndex < 10; spokeIndex += 1) {
-      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, 0.42), rimMaterial);
-      spoke.name = "wheelSpoke";
-      spoke.position.x = visibleFaceOffset;
-      spoke.rotation.x = (spokeIndex / 10) * Math.PI * 2;
-      spoke.castShadow = true;
-      wheel.add(spoke);
-    }
-
-    const caliper = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.24, 0.1), brakeMaterial);
-    caliper.name = "wheelCaliper";
-    caliper.position.set(visibleFaceOffset * 1.06, 0.18, -0.08);
-    caliper.castShadow = true;
-    wheel.add(tire, brake, rim, hub, caliper);
-    wheelMeshes.push(wheel);
-    scene.add(wheel);
+    wheelMeshes.push(createWheelVisual(physics, i, selectedCarId));
   }
 
   return { vehicle, chassisBody, carGroup };
 }
 
 function createCarMesh(modelId = selectedCarId) {
+  if (modelId === "formulaRb22") {
+    return createFormulaRb22Mesh();
+  }
+
   if (modelId === "amg") {
     return createAmgCarMesh();
   }
@@ -2709,6 +2745,262 @@ function createCarMesh(modelId = selectedCarId) {
   tunedMassRailB.position.x = 0.25;
 
   visualRoot.add(tunedMassBlock, tunedMassRailA, tunedMassRailB);
+  group.add(visualRoot);
+  return group;
+}
+
+function createFormulaRb22Mesh() {
+  const group = new THREE.Group();
+  const visualRoot = new THREE.Group();
+  visualRoot.name = "carVisualRoot";
+
+  const bodyMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x071f4a,
+    roughness: 0.12,
+    metalness: 0.52,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.16,
+  });
+  const blueHighlightMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x104aa5,
+    roughness: 0.1,
+    metalness: 0.46,
+    clearcoat: 0.78,
+    clearcoatRoughness: 0.14,
+  });
+  const carbonMaterial = new THREE.MeshStandardMaterial({
+    color: 0x05070b,
+    roughness: 0.42,
+    metalness: 0.38,
+  });
+  const matteBlackMaterial = new THREE.MeshStandardMaterial({
+    color: 0x090b10,
+    roughness: 0.64,
+    metalness: 0.18,
+  });
+  const redAccentMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd52b32,
+    roughness: 0.22,
+    metalness: 0.26,
+  });
+  const yellowAccentMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf4c43a,
+    roughness: 0.2,
+    metalness: 0.26,
+  });
+  const cockpitMaterial = new THREE.MeshStandardMaterial({
+    color: 0x06080c,
+    roughness: 0.78,
+    metalness: 0.08,
+  });
+  const seatMaterial = new THREE.MeshStandardMaterial({
+    color: 0x171b22,
+    roughness: 0.68,
+    metalness: 0.08,
+  });
+  const decalMaterial = new THREE.MeshBasicMaterial({
+    map: makeFormulaSideDecalTexture(),
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+  const noseDecalMaterial = new THREE.MeshBasicMaterial({
+    map: makeFormulaNoseDecalTexture(),
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+  const wingDecalMaterial = new THREE.MeshBasicMaterial({
+    map: makeFormulaWingDecalTexture(),
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+
+  function box(width, height, depth, material, x, y, z, rx = 0, ry = 0, rz = 0, name = "") {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    if (name) mesh.name = name;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function plane(width, height, material, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.renderOrder = 10;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function cylinder(radius, height, material, x, y, z, rx = 0, ry = 0, rz = 0, name = "") {
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 18), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    if (name) mesh.name = name;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function ellipsoid(width, height, depth, material, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 14), material);
+    mesh.scale.set(width / 2, height / 2, depth / 2);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function wedge(width, height, depth, frontScale, material, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const rearHalf = width / 2;
+    const frontHalf = (width * frontScale) / 2;
+    const yBottom = -height / 2;
+    const yTop = height / 2;
+    const zRear = -depth / 2;
+    const zFront = depth / 2;
+    const vertices = new Float32Array([
+      -rearHalf, yBottom, zRear,
+      rearHalf, yBottom, zRear,
+      rearHalf, yTop, zRear,
+      -rearHalf, yTop, zRear,
+      -frontHalf, yBottom * 0.72, zFront,
+      frontHalf, yBottom * 0.72, zFront,
+      frontHalf, yTop * 0.52, zFront,
+      -frontHalf, yTop * 0.52, zFront,
+    ]);
+    const indices = [
+      0, 1, 2, 0, 2, 3,
+      4, 6, 5, 4, 7, 6,
+      0, 4, 5, 0, 5, 1,
+      3, 2, 6, 3, 6, 7,
+      1, 5, 6, 1, 6, 2,
+      0, 3, 7, 0, 7, 4,
+    ];
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  function strut(ax, ay, az, bx, by, bz, radius = 0.025, material = carbonMaterial) {
+    const start = new THREE.Vector3(ax, ay, az);
+    const end = new THREE.Vector3(bx, by, bz);
+    const direction = end.clone().sub(start);
+    const length = direction.length();
+    if (length <= 0.001) return null;
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 8), material);
+    mesh.position.copy(start).lerp(end, 0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+    mesh.castShadow = true;
+    visualRoot.add(mesh);
+    return mesh;
+  }
+
+  box(1.18, 0.11, 4.65, carbonMaterial, 0, -0.25, -0.12);
+  box(1.42, 0.07, 2.7, matteBlackMaterial, 0, -0.18, -0.58);
+  wedge(0.46, 0.22, 2.3, 0.22, bodyMaterial, 0, 0.06, 1.28, -0.025);
+  wedge(0.28, 0.12, 1.12, 0.16, blueHighlightMaterial, 0, 0.17, 1.74, -0.03);
+  ellipsoid(1.12, 0.48, 1.76, bodyMaterial, 0, 0.16, -0.18, -0.04);
+  ellipsoid(0.74, 0.3, 0.92, cockpitMaterial, 0, 0.32, -0.38, -0.06);
+  box(0.5, 0.15, 0.48, seatMaterial, 0, 0.22, -0.58, -0.18);
+  cylinder(0.13, 0.04, matteBlackMaterial, 0, 0.42, -0.02, Math.PI / 2, 0, 0.2);
+
+  box(0.18, 0.08, 0.72, carbonMaterial, 0, 0.55, -0.24, -0.18);
+  cylinder(0.04, 0.84, carbonMaterial, -0.28, 0.48, -0.25, 0.28, 0, -0.58);
+  cylinder(0.04, 0.84, carbonMaterial, 0.28, 0.48, -0.25, 0.28, 0, 0.58);
+  strut(-0.28, 0.48, -0.25, 0, 0.62, -0.72, 0.032);
+  strut(0.28, 0.48, -0.25, 0, 0.62, -0.72, 0.032);
+
+  box(0.42, 0.36, 0.62, bodyMaterial, 0, 0.38, -1.2, -0.18);
+  box(0.12, 0.74, 1.22, bodyMaterial, 0, 0.69, -1.62, -0.18);
+  box(0.08, 0.68, 0.88, yellowAccentMaterial, 0, 0.74, -1.5, -0.18);
+  box(0.78, 0.18, 0.48, matteBlackMaterial, 0, 0.17, -1.55, -0.08);
+
+  for (const side of [-1, 1]) {
+    wedge(0.64, 0.34, 1.6, 0.55, blueHighlightMaterial, side * 0.66, -0.01, -0.42, 0, side * 0.04);
+    wedge(0.44, 0.3, 1.08, 0.42, bodyMaterial, side * 0.86, 0.06, -0.64, 0, side * 0.1);
+    box(0.48, 0.12, 1.34, carbonMaterial, side * 0.86, -0.2, -0.42);
+    box(0.58, 0.07, 0.18, redAccentMaterial, side * 0.64, 0.24, -0.18, 0, side * 0.12);
+    box(0.42, 0.06, 0.16, yellowAccentMaterial, side * 0.72, 0.18, -0.46, 0, side * 0.12);
+    plane(0.78, 0.22, decalMaterial, side * 1.02, 0.09, -0.45, 0, side > 0 ? Math.PI / 2 : -Math.PI / 2);
+    plane(0.46, 0.18, noseDecalMaterial, side * 0.23, 0.19, 1.08, -0.18, 0, side * 0.07);
+    box(0.2, 0.32, 0.48, matteBlackMaterial, side * 1.2, -0.04, 1.38, 0, side * 0.16);
+    box(0.22, 0.38, 0.58, matteBlackMaterial, side * 1.23, -0.02, -1.43, 0, side * -0.08);
+    strut(side * 0.24, -0.08, 1.22, side * 1.0, -0.08, 1.64, 0.022);
+    strut(side * 0.2, 0.09, 1.0, side * 1.0, 0.02, 1.48, 0.018);
+    strut(side * 0.34, -0.08, -1.16, side * 1.02, -0.08, -1.58, 0.024);
+    strut(side * 0.28, 0.08, -1.02, side * 1.02, 0.03, -1.4, 0.018);
+    cylinder(0.16, 0.08, carbonMaterial, side * 1.1, -0.02, 1.48, Math.PI / 2);
+    cylinder(0.18, 0.08, carbonMaterial, side * 1.12, -0.02, -1.5, Math.PI / 2);
+  }
+
+  box(3.22, 0.07, 0.34, carbonMaterial, 0, -0.28, 2.42, -0.04);
+  box(2.82, 0.045, 0.24, blueHighlightMaterial, 0, -0.2, 2.36, -0.08);
+  box(2.52, 0.04, 0.18, redAccentMaterial, 0, -0.12, 2.26, -0.12);
+  for (const side of [-1, 1]) {
+    box(0.12, 0.34, 0.48, carbonMaterial, side * 1.66, -0.18, 2.38, 0, side * 0.12);
+    box(0.06, 0.22, 0.62, yellowAccentMaterial, side * 1.35, -0.19, 2.34, 0, side * 0.08);
+  }
+
+  box(2.42, 0.09, 0.32, carbonMaterial, 0, 1.08, -2.32, -0.04);
+  box(2.18, 0.06, 0.2, blueHighlightMaterial, 0, 0.91, -2.24, -0.08);
+  box(2.18, 0.035, 0.16, redAccentMaterial, 0, 0.72, -2.15, -0.1);
+  plane(1.32, 0.24, wingDecalMaterial, 0, 1.14, -2.49, 0, Math.PI);
+  for (const side of [-1, 1]) {
+    box(0.12, 0.76, 0.58, carbonMaterial, side * 1.28, 0.88, -2.32, 0.02);
+    box(0.06, 0.62, 0.46, yellowAccentMaterial, side * 1.18, 0.9, -2.29, 0.02);
+    strut(side * 0.32, 0.02, -1.52, side * 0.64, 0.78, -2.08, 0.025);
+  }
+
+  box(0.48, 0.16, 0.24, matteBlackMaterial, 0, 0.15, -2.06);
+  cylinder(0.055, 0.34, matteBlackMaterial, -0.18, 0.08, -2.18, Math.PI / 2);
+  cylinder(0.055, 0.34, matteBlackMaterial, 0.18, 0.08, -2.18, Math.PI / 2);
+
+  const damperMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd8dce2,
+    roughness: 0.28,
+    metalness: 0.68,
+  });
+  const damperPoints = [
+    [-0.9, -0.16, 1.48],
+    [0.9, -0.16, 1.48],
+    [-0.92, -0.16, -1.5],
+    [0.92, -0.16, -1.5],
+  ];
+  for (let index = 0; index < damperPoints.length; index += 1) {
+    const [x, y, z] = damperPoints[index];
+    const spring = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.52, 10), damperMaterial);
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.74, 8), carbonMaterial);
+    spring.name = `damperSpring${index}`;
+    rod.name = `damperRod${index}`;
+    spring.position.set(x, y, z);
+    rod.position.set(x, y, z);
+    spring.userData.baseY = y;
+    rod.userData.baseY = y;
+    spring.rotation.z = x < 0 ? -0.42 : 0.42;
+    rod.rotation.z = spring.rotation.z;
+    spring.castShadow = true;
+    rod.castShadow = true;
+    visualRoot.add(spring, rod);
+  }
+
+  const tunedMassBlock = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.34), yellowAccentMaterial);
+  tunedMassBlock.name = "tunedMassBlock";
+  tunedMassBlock.position.set(0, 0.44, -0.1);
+  tunedMassBlock.castShadow = true;
+  visualRoot.add(tunedMassBlock);
+
   group.add(visualRoot);
   return group;
 }
@@ -5092,6 +5384,7 @@ function selectCar(carId) {
   vehicle.configure(vehiclePhysicsConfig);
   vehiclePhysics = vehicle;
   resetDriftBoost(true);
+  replaceWheelMeshes();
   replaceCarMesh();
   applyVehicleTuning();
   updateWheelStyle();
@@ -5120,6 +5413,18 @@ function replaceCarMesh() {
   carVisualMotion.initialized = false;
   for (const wheelMotion of wheelMeshMotion) {
     wheelMotion.initialized = false;
+  }
+}
+
+function replaceWheelMeshes() {
+  for (const wheel of wheelMeshes.splice(0)) {
+    scene.remove(wheel);
+    disposeObject3D(wheel);
+  }
+
+  for (let i = 0; i < vehicle.wheelInfos.length; i += 1) {
+    wheelMeshes.push(createWheelVisual(vehiclePhysicsConfig, i, selectedCarId));
+    wheelMeshMotion[i].initialized = false;
   }
 }
 
@@ -6791,6 +7096,7 @@ function updateTunedMassVisual() {
 
 function updateCamera(delta) {
   const cameraSubject = getCameraSubject();
+  const tuning = getCarTuning();
   const carPosition = cameraSubject.position;
   const carQuaternion = cameraSubject.quaternion;
   const rawForward = new THREE.Vector3(0, 0, 1).applyQuaternion(carQuaternion).normalize();
@@ -6836,9 +7142,9 @@ function updateCamera(delta) {
     desiredPosition = target.clone().add(orbitOffset);
     lookTarget = target.clone().add(up.clone().multiplyScalar(0.3));
   } else if (cameraMode === 0) {
-    const distance = THREE.MathUtils.lerp(8.4, 7.1, speedFactor);
-    const height = THREE.MathUtils.lerp(4.25, 5.25, speedFactor);
-    const lookAhead = THREE.MathUtils.lerp(10.5, 16.5, speedFactor);
+    const distance = THREE.MathUtils.lerp(8.4, 7.1, speedFactor) + (tuning.cameraDistanceOffset ?? 0);
+    const height = THREE.MathUtils.lerp(4.25, 5.25, speedFactor) + (tuning.cameraHeightOffset ?? 0);
+    const lookAhead = THREE.MathUtils.lerp(10.5, 16.5, speedFactor) + (tuning.cameraLookAheadOffset ?? 0);
     desiredPosition = target.clone().addScaledVector(cameraRig.forward, -distance).add(up.clone().multiplyScalar(height));
     lookTarget = target.clone().addScaledVector(cameraRig.forward, lookAhead).add(up.clone().multiplyScalar(0.15));
   } else {
@@ -7574,6 +7880,90 @@ function makeJdmSideDecalTexture(text, accentHex = 0x2c68d8, modelId = "ae86") {
     context.fillStyle = accent;
     context.font = "italic 800 36px Arial, sans-serif";
     context.fillText(text, 278, 86);
+  });
+}
+
+function makeFormulaSideDecalTexture() {
+  return makeCanvasTexture(512, 160, (context) => {
+    context.clearRect(0, 0, 512, 160);
+    const gradient = context.createLinearGradient(0, 0, 512, 160);
+    gradient.addColorStop(0, "rgba(8, 18, 42, 0)");
+    gradient.addColorStop(0.28, "rgba(16, 74, 165, 0.88)");
+    gradient.addColorStop(0.68, "rgba(4, 8, 14, 0.9)");
+    gradient.addColorStop(1, "rgba(8, 18, 42, 0)");
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.moveTo(18, 106);
+    context.lineTo(152, 58);
+    context.lineTo(490, 78);
+    context.lineTo(430, 124);
+    context.lineTo(54, 136);
+    context.closePath();
+    context.fill();
+
+    context.strokeStyle = "#f4c43a";
+    context.lineWidth = 7;
+    context.beginPath();
+    context.moveTo(86, 128);
+    context.lineTo(242, 72);
+    context.lineTo(438, 92);
+    context.stroke();
+
+    context.strokeStyle = "#d52b32";
+    context.lineWidth = 5;
+    context.beginPath();
+    context.moveTo(58, 92);
+    context.lineTo(192, 46);
+    context.lineTo(362, 58);
+    context.stroke();
+
+    context.font = "italic 900 46px Arial, sans-serif";
+    context.lineWidth = 4;
+    context.strokeStyle = "rgba(0, 0, 0, 0.7)";
+    context.strokeText("AURORA", 210, 106);
+    context.fillStyle = "#f5f7ff";
+    context.fillText("AURORA", 210, 106);
+    context.font = "800 20px Arial, sans-serif";
+    context.fillStyle = "#f4c43a";
+    context.fillText("VTX RACING", 58, 78);
+  });
+}
+
+function makeFormulaNoseDecalTexture() {
+  return makeCanvasTexture(256, 128, (context) => {
+    context.clearRect(0, 0, 256, 128);
+    context.fillStyle = "rgba(4, 8, 14, 0.84)";
+    context.beginPath();
+    context.moveTo(26, 98);
+    context.lineTo(128, 22);
+    context.lineTo(230, 98);
+    context.closePath();
+    context.fill();
+    context.strokeStyle = "#104aa5";
+    context.lineWidth = 8;
+    context.stroke();
+    context.font = "italic 900 44px Arial, sans-serif";
+    context.fillStyle = "#f4c43a";
+    context.fillText("22", 102, 84);
+    context.fillStyle = "#d52b32";
+    context.fillRect(44, 102, 168, 8);
+  });
+}
+
+function makeFormulaWingDecalTexture() {
+  return makeCanvasTexture(512, 96, (context) => {
+    context.clearRect(0, 0, 512, 96);
+    context.fillStyle = "rgba(5, 7, 11, 0.9)";
+    context.fillRect(0, 0, 512, 96);
+    context.fillStyle = "#f5f7ff";
+    context.font = "italic 900 34px Arial, sans-serif";
+    context.fillText("NEBULA RACING", 94, 58);
+    context.fillStyle = "#104aa5";
+    context.fillRect(16, 16, 58, 16);
+    context.fillStyle = "#d52b32";
+    context.fillRect(16, 40, 58, 16);
+    context.fillStyle = "#f4c43a";
+    context.fillRect(16, 64, 58, 16);
   });
 }
 
