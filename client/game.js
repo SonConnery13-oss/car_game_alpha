@@ -1690,9 +1690,9 @@ function addCheckeredGate(group, gate, stripeMaterialA, stripeMaterialB, width =
   for (let i = 0; i < 8; i += 1) {
     const lateralOffset = -width / 2 + width / 16 + (i * width) / 8;
     const position = center.clone().addScaledVector(normal, lateralOffset);
-    const y = getTrackElevation(position.x, position.y) + TRACK_SURFACE_OFFSET + 0.055;
+    const y = getTrackElevation(position.x, position.y) + TRACK_SURFACE_OFFSET + 0.008;
     const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(width / 8, 0.035, 1.05),
+      new THREE.BoxGeometry(width / 8, 0.004, 1.05),
       i % 2 === 0 ? stripeMaterialA : stripeMaterialB,
     );
     stripe.position.set(position.x, y, position.y);
