@@ -8,10 +8,10 @@ export const MAP_MONACO = {
   visualProfile: "monacoStreet",
   loop: true,
   samples: 880,
-  roadWidth: 9.25,
-  wallOffset: 0.54,
-  wallHeight: 1.18,
-  wallThickness: 0.48,
+  roadWidth: 11.4,
+  wallOffset: 0.88,
+  wallHeight: 1.34,
+  wallThickness: 0.72,
   disableTestArea: true,
   disableBridgeRoutes: true,
   spawnOffset: -2.4,
@@ -20,12 +20,17 @@ export const MAP_MONACO = {
   miniMapScale: 1.08,
   asphalt: {
     base: "#1d2023",
+    color: 0x181b1e,
     fleckMin: 12,
     fleckRange: 36,
     patchColor: "rgba(70, 72, 73, 0.34)",
     tireColor: "rgba(5, 5, 5, 0.33)",
     crackColor: "rgba(8, 8, 8, 0.2)",
     repeat: 46,
+  },
+  curbColors: {
+    primary: 0xd7352d,
+    secondary: 0xf3f1e8,
   },
   sky: {
     topColor: 0x77c4ff,
@@ -34,11 +39,14 @@ export const MAP_MONACO = {
   sun: { x: -78, y: 124, z: -38 },
   fogDensity: 0.0019,
   elevationFeatures: [
-    { x: 78, z: -132, height: 0.95, radiusX: 92, radiusZ: 74 },
-    { x: 28, z: -64, height: 1.35, radiusX: 94, radiusZ: 62 },
-    { x: -78, z: 22, height: -0.9, radiusX: 68, radiusZ: 74 },
-    { x: 154, z: 42, height: -0.5, radiusX: 102, radiusZ: 52 },
-    { x: -42, z: -154, height: 0.42, radiusX: 82, radiusZ: 50 },
+    { x: -344, z: -166, height: 0.65, radiusX: 92, radiusZ: 54 },
+    { x: -126, z: -132, height: 2.25, radiusX: 160, radiusZ: 92 },
+    { x: 92, z: -30, height: 2.85, radiusX: 138, radiusZ: 78 },
+    { x: 208, z: -82, height: -0.95, radiusX: 98, radiusZ: 62 },
+    { x: 404, z: -70, height: -1.25, radiusX: 116, radiusZ: 76 },
+    { x: 336, z: 96, height: -1.0, radiusX: 132, radiusZ: 70 },
+    { x: 80, z: 64, height: -0.55, radiusX: 126, radiusZ: 62 },
+    { x: -284, z: -94, height: 0.9, radiusX: 80, radiusZ: 72 },
   ],
   sections: [
     { name: "Start/Finish Straight", start: 0.0, end: 0.07, style: "straight", braking: "medium" },
@@ -56,7 +64,7 @@ export const MAP_MONACO = {
     { name: "Anthony Noghes", start: 0.94, end: 1.0, style: "final-corner", braking: "medium" },
   ],
   tunnelSections: [
-    { start: 0.49, end: 0.59, lightStep: 7, sideWallOffset: 1.75 },
+    { start: 0.49, end: 0.59, lightStep: 7, sideWallOffset: 2.15 },
   ],
   harborSections: [
     { start: 0.65, end: 0.78, side: -1, width: 38, offset: 32 },
@@ -68,6 +76,34 @@ export const MAP_MONACO = {
   ],
   yachtSections: [
     { start: 0.67, end: 0.77, side: -1, count: 7 },
+  ],
+  pitExitLines: [
+    { start: 0.0, end: 0.14, side: -1, offset: 3.9 },
+  ],
+  runoffZones: [
+    { start: 0.585, end: 0.66, side: 1, width: 7.4, offset: 10.4, material: "paintedBlue", striped: true, stripeCount: 4, materials: ["paintedBlue", "paintedWhite", "paintedRed", "paintedBlue"], grip: 0.82 },
+    { start: 0.59, end: 0.66, side: -1, width: 5.6, offset: 9.1, material: "paintedRed", striped: true, stripeCount: 3, materials: ["paintedRed", "paintedWhite", "paintedBlue"], grip: 0.8 },
+    { start: 0.77, end: 0.86, side: -1, width: 8.2, offset: 10.8, material: "paintedBlue", striped: true, stripeCount: 4, materials: ["paintedBlue", "paintedRed", "paintedWhite", "paintedBlue"], grip: 0.82 },
+    { start: 0.77, end: 0.86, side: 1, width: 5.8, offset: 9.3, material: "paintedRed", striped: true, stripeCount: 3, materials: ["paintedRed", "paintedWhite", "paintedBlue"], grip: 0.8 },
+    { start: 0.89, end: 0.98, side: 1, width: 5.4, offset: 9.2, material: "paintedRed", striped: true, stripeCount: 3, materials: ["paintedRed", "paintedWhite", "paintedRed"], grip: 0.82 },
+  ],
+  gantries: [
+    { fraction: 0.065, text: "SAINTE DEVOTE", background: 0x111f36, foreground: 0xf8f0df, accent: 0xd7352d, postOffset: 2.8, clearance: 5.4 },
+    { fraction: 0.5, text: "TUNNEL", background: 0x25292d, foreground: 0xffefad, accent: 0x8fc9ff, postOffset: 3.0, clearance: 5.3 },
+    { fraction: 0.79, text: "PISCINE", background: 0x0d5f9c, foreground: 0xf8f0df, accent: 0xd7352d, postOffset: 3.0, clearance: 5.4 },
+  ],
+  catchFenceZones: [
+    { start: 0.0, end: 0.18, sides: [-1, 1], offset: 8.4, height: 2.5, step: 6 },
+    { start: 0.25, end: 0.43, sides: [-1, 1], offset: 8.2, height: 2.4, step: 6 },
+    { start: 0.6, end: 0.86, sides: [-1, 1], offset: 8.6, height: 2.7, step: 6 },
+    { start: 0.86, end: 1.0, sides: [-1, 1], offset: 8.3, height: 2.5, step: 6 },
+  ],
+  wallPanelZones: [
+    { start: 0.0, end: 0.18, sides: [-1, 1], texts: ["ROLEX", "aramco"], background: 0x07965b, foreground: 0xf8f2df, accent: 0xf8f2df, step: 8 },
+    { start: 0.18, end: 0.34, sides: [-1, 1], texts: ["QATAR", "MONACO"], background: 0x7d213f, foreground: 0xf8f2df, accent: 0xf0c85a, step: 8 },
+    { start: 0.49, end: 0.59, sides: [-1, 1], texts: ["TUNNEL"], background: 0x1c2228, foreground: 0xffefad, accent: 0x8fc9ff, step: 8 },
+    { start: 0.6, end: 0.86, sides: [-1, 1], texts: ["MSC", "MONACO GP"], background: 0x142142, foreground: 0xf8f2df, accent: 0xd7352d, step: 8 },
+    { start: 0.86, end: 1.0, sides: [-1, 1], texts: ["CASINO", "LE CASINO"], background: 0x161a1e, foreground: 0xf8f2df, accent: 0xd6b65b, step: 8 },
   ],
   adBoards: [
     { fraction: 0.09, side: 1, text: "AZURE GP" },

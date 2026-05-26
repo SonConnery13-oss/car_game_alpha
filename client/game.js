@@ -99,13 +99,13 @@ const BRIDGE_ROUTES = [
 const TRACK_SURFACE_OFFSET = 0.065;
 const MAX_FORWARD_SPEED = 200 / 3.6;
 const STEERING_INPUT_RESPONSE = {
-  keyboard: 3.05,
-  analog: 5.15,
-  return: 6.35,
+  keyboard: 2.25,
+  analog: 3.85,
+  return: 5.05,
 };
 const STEERING_INPUT_CURVE = {
-  keyboard: 1,
-  analog: 1.35,
+  keyboard: 1.08,
+  analog: 1.55,
 };
 const VISUAL_SUSPENSION = {
   stiffness: 260,
@@ -725,6 +725,8 @@ function createWorld() {
     createGrandstands();
   }
 
+  createTracksideCatchFences();
+  createCourseGantries();
   createCourseAdBoards();
 }
 
@@ -851,10 +853,11 @@ function createTerrainGeometry(size, segments, yOffset = 0) {
 function createTrack() {
   const asphaltTexture = makeAsphaltTexture(activeCourse.asphalt);
   asphaltTexture.repeat.set(1, activeCourse.asphalt?.repeat ?? 30);
+  const roadColor = activeCourse.asphalt?.color ?? (activeCourse.environment === "mountain" ? 0x25282a : 0x1d2022);
 
   const roadMaterial = new THREE.MeshStandardMaterial({
     map: asphaltTexture,
-    color: activeCourse.environment === "mountain" ? 0x25282a : 0x1d2022,
+    color: roadColor,
     roughness: 0.84,
     metalness: 0.02,
     polygonOffset: true,
@@ -960,6 +963,8 @@ function createTrack() {
   if (activeCourse.environment === "mountain") {
     createCenterLaneMarks();
     createTireWearMarks();
+  } else if (activeCourse.visualProfile === "monacoStreet") {
+    createStreetLaneMarks();
   } else {
     createRacingLine();
   }
@@ -1029,6 +1034,54 @@ function createCenterLaneMarks() {
     dash.rotation.y = yaw;
     dash.renderOrder = 8;
     scene.add(dash);
+  }
+}
+
+function createStreetLaneMarks() {
+  const whiteMaterial = new THREE.MeshBasicMaterial({
+    color: 0xf4f4ee,
+    transparent: true,
+    opacity: 0.82,
+    polygonOffset: true,
+    polygonOffsetFactor: -7,
+    polygonOffsetUnits: -7,
+  });
+  const yellowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xf2d04f,
+    transparent: true,
+    opacity: 0.86,
+    polygonOffset: true,
+    polygonOffsetFactor: -8,
+    polygonOffsetUnits: -8,
+  });
+
+  for (let i = 7; i < trackPoints.length; i += 10) {
+    const point = trackPoints[i];
+    const tangent = getTrackTangent(i);
+    const yaw = Math.atan2(tangent.x, tangent.y);
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.024, 3.4), whiteMaterial);
+    dash.position.set(point.x, getTrackElevation(point.x, point.y) + TRACK_SURFACE_OFFSET + 0.145, point.y);
+    dash.rotation.y = yaw;
+    dash.renderOrder = 8;
+    scene.add(dash);
+  }
+
+  for (const section of activeCourse.pitExitLines ?? []) {
+    const indices = getTrackSectionIndices(section.start, section.end, 5);
+    const side = section.side ?? -1;
+    const offset = section.offset ?? ROAD_WIDTH / 2 - 1.7;
+
+    for (const index of indices) {
+      const point = trackPoints[index];
+      const normal = getTrackNormal(index);
+      const tangent = getTrackTangent(index);
+      const base = point.clone().addScaledVector(normal, side * offset);
+      const dash = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.024, 3.8), yellowMaterial);
+      dash.position.set(base.x, getTrackElevation(base.x, base.y) + TRACK_SURFACE_OFFSET + 0.155, base.y);
+      dash.rotation.y = Math.atan2(tangent.x, tangent.y);
+      dash.renderOrder = 9;
+      scene.add(dash);
+    }
   }
 }
 
@@ -1541,6 +1594,7 @@ function createGrandstand(index, side, standMaterial, seatMaterial, roofMaterial
   if (isNearTrack(base.x, base.y, ROAD_WIDTH + 6) || isNearTestArea(base.x, base.y, 8)) return;
 
   const yaw = Math.atan2(tangent.x, tangent.y);
+  if (!isRectFootprintClearOfTrack(base.x, base.y, 17.5, 6.4, yaw, 3.2)) return;
   const groundY = getTrackElevation(base.x, base.y);
   const stand = new THREE.Group();
 
@@ -1723,15 +1777,17 @@ function createMountainScenery() {
 }
 
 function createMonacoStreetScenery() {
+  createCircuitRunoffZones();
   createMonacoHarborWater();
   createMonacoTunnel();
   createMonacoLandmarkBuildings();
   createYachtMarina();
   createMonacoBarrierStripes();
+  createMonacoWallPanels();
 }
 
 function createSpaCircuitScenery() {
-  createSpaRunoffZones();
+  createCircuitRunoffZones();
   createSpaTireBarriers();
   createSpaFacilities();
 }
@@ -1824,6 +1880,7 @@ function createMonacoLandmarkBuildings() {
 
     const groundY = getTrackElevation(base.x, base.y);
     const yaw = Math.atan2(tangent.x, tangent.y);
+    if (!isRectFootprintClearOfTrack(base.x, base.y, def.width ?? 18, def.depth ?? 14, yaw, 2.2)) continue;
     const facadeMaterial = new THREE.MeshStandardMaterial({
       map: makeBuildingTexture(def.color ?? 0xd6c6a0, 0xffefb4),
       roughness: 0.68,
@@ -1931,7 +1988,7 @@ function createMonacoBarrierStripes() {
   }
 }
 
-function createSpaRunoffZones() {
+function createCircuitRunoffZones() {
   const gravelMaterial = new THREE.MeshStandardMaterial({
     map: makeRoadShoulderTexture(activeCourse.shoulder),
     color: 0xb1a884,
@@ -1948,13 +2005,77 @@ function createSpaRunoffZones() {
     polygonOffsetFactor: -0.8,
     polygonOffsetUnits: -0.8,
   });
+  const asphaltMaterial = new THREE.MeshStandardMaterial({
+    map: makeAsphaltTexture({ base: "#171a1d", repeat: 20 }),
+    color: 0x16191c,
+    roughness: 0.88,
+    metalness: 0.02,
+    polygonOffset: true,
+    polygonOffsetFactor: -0.8,
+    polygonOffsetUnits: -0.8,
+  });
+  const concreteMaterial = new THREE.MeshStandardMaterial({
+    color: 0xbcc1bb,
+    roughness: 0.9,
+    metalness: 0.02,
+    polygonOffset: true,
+    polygonOffsetFactor: -0.8,
+    polygonOffsetUnits: -0.8,
+  });
+  const materialByName = {
+    gravel: gravelMaterial,
+    grass: grassMaterial,
+    asphalt: asphaltMaterial,
+    concrete: concreteMaterial,
+    paintedGreen: makePaintedRunoffMaterial(0x16a45b),
+    paintedYellow: makePaintedRunoffMaterial(0xf4d331),
+    paintedRed: makePaintedRunoffMaterial(0xd9352c),
+    paintedBlue: makePaintedRunoffMaterial(0x2196d8),
+    paintedWhite: makePaintedRunoffMaterial(0xf4f2e8),
+  };
 
   for (const zone of activeCourse.runoffZones ?? []) {
-    const material = zone.material === "grass" ? grassMaterial : gravelMaterial;
-    const runoff = createTracksideSurfaceRibbon(zone, material, TRACK_SURFACE_OFFSET + 0.032, 5);
+    if (zone.striped) {
+      createStripedRunoffZone(zone, materialByName);
+    } else {
+      const material = materialByName[zone.material] ?? gravelMaterial;
+      const runoff = createTracksideSurfaceRibbon(zone, material, TRACK_SURFACE_OFFSET + 0.032, zone.crossSegments ?? 5);
+      if (!runoff) continue;
+      runoff.receiveShadow = true;
+      runoff.renderOrder = 1;
+      scene.add(runoff);
+    }
+  }
+}
+
+function makePaintedRunoffMaterial(color) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.76,
+    metalness: 0.02,
+    polygonOffset: true,
+    polygonOffsetFactor: -0.95,
+    polygonOffsetUnits: -0.95,
+  });
+}
+
+function createStripedRunoffZone(zone, materialByName) {
+  const stripeCount = Math.max(2, zone.stripeCount ?? zone.materials?.length ?? 3);
+  const stripeWidth = (zone.width ?? 10) / stripeCount;
+  const firstCenter = (zone.offset ?? ROAD_WIDTH / 2 + (zone.width ?? 10) / 2) - (zone.width ?? 10) / 2 + stripeWidth / 2;
+  const materials = zone.materials ?? ["paintedGreen", "paintedYellow", "paintedRed"];
+
+  for (let stripeIndex = 0; stripeIndex < stripeCount; stripeIndex += 1) {
+    const material = materialByName[materials[stripeIndex % materials.length]] ?? materialByName.paintedGreen;
+    const runoff = createTracksideSurfaceRibbon({
+      ...zone,
+      striped: false,
+      width: stripeWidth + 0.04,
+      offset: firstCenter + stripeIndex * stripeWidth,
+    }, material, TRACK_SURFACE_OFFSET + 0.042 + stripeIndex * 0.001, zone.crossSegments ?? 2);
     if (!runoff) continue;
     runoff.receiveShadow = true;
-    runoff.renderOrder = 1;
+    runoff.renderOrder = 2;
     scene.add(runoff);
   }
 }
@@ -2004,23 +2125,34 @@ function createSpaFacilities() {
     const normal = getTrackNormal(index);
     const side = zone.side ?? 1;
     const yaw = Math.atan2(tangent.x, tangent.y);
-    const base = point.clone().addScaledVector(normal, side * getRoadsideObjectOffset(11));
+    const facilityLength = zone.length ?? (zone.type === "pit" ? 48 : 34);
+    const facilityDepth = zone.depth ?? (zone.type === "pit" ? 10.5 : 5.2);
+    const centerOffset = Number.isFinite(zone.offset)
+      ? zone.offset
+      : getRoadsideObjectOffset(facilityDepth * 0.5 + 8.5);
+    const base = point.clone().addScaledVector(normal, side * centerOffset);
     const groundY = getTrackElevation(base.x, base.y);
+    if (
+      !isRoadsideObjectClear(base.x, base.y, facilityDepth * 0.5, 0.8) ||
+      !isRectFootprintClearOfTrack(base.x, base.y, facilityLength, facilityDepth, yaw, 3.0)
+    ) {
+      continue;
+    }
 
     if (zone.type === "pit") {
       const pit = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(zone.length ?? 48, 6.8, 10.5), pitMaterial);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(facilityLength, 6.8, facilityDepth), pitMaterial);
       body.position.y = 3.4;
       body.castShadow = true;
       body.receiveShadow = true;
       pit.add(body);
 
-      const glass = new THREE.Mesh(new THREE.BoxGeometry((zone.length ?? 48) - 5, 2.1, 0.16), glassMaterial);
-      glass.position.set(0, 5.2, side * -5.35);
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(facilityLength - 5, 2.1, 0.16), glassMaterial);
+      glass.position.set(0, 5.2, side * -(facilityDepth / 2 + 0.1));
       glass.rotation.y = side > 0 ? Math.PI : 0;
       pit.add(glass);
 
-      const roof = new THREE.Mesh(new THREE.BoxGeometry((zone.length ?? 48) + 3, 0.5, 12.6), roofMaterial);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(facilityLength + 3, 0.5, facilityDepth + 2.1), roofMaterial);
       roof.position.y = 7.05;
       roof.castShadow = true;
       pit.add(roof);
@@ -2029,12 +2161,13 @@ function createSpaFacilities() {
       pit.rotation.y = yaw;
       scene.add(pit);
     } else {
-      createTracksideGrandstand(base.x, groundY, base.y, yaw, side, zone.length ?? 34, seatMaterial, roofMaterial);
+      createTracksideGrandstand(base.x, groundY, base.y, yaw, side, facilityLength, seatMaterial, roofMaterial);
     }
   }
 }
 
 function createTracksideGrandstand(x, y, z, yaw, side, length, seatMaterial, roofMaterial) {
+  if (!isRectFootprintClearOfTrack(x, z, length + 2, 5.2, yaw, 3.0)) return;
   const stand = new THREE.Group();
   const frameMaterial = new THREE.MeshStandardMaterial({ color: 0xaeb4af, roughness: 0.7, metalness: 0.06 });
 
@@ -2092,6 +2225,169 @@ function createCourseAdBoards() {
       post.position.set(postBase.x, getTrackElevation(postBase.x, postBase.y) + 1.1, postBase.y);
       post.castShadow = true;
       scene.add(post);
+    }
+  }
+}
+
+function createCourseGantries() {
+  const gantries = activeCourse.gantries ?? [];
+  if (!gantries.length) return;
+
+  const postMaterial = new THREE.MeshStandardMaterial({ color: 0x383e40, roughness: 0.46, metalness: 0.42 });
+  const trussMaterial = new THREE.MeshStandardMaterial({ color: 0xd5d8d2, roughness: 0.42, metalness: 0.28 });
+
+  for (const gantry of gantries) {
+    const index = getTrackIndexFromFraction(gantry.fraction);
+    const point = trackPoints[index];
+    const normal = getTrackNormal(index);
+    const tangent = getTrackTangent(index);
+    const roadClearance = gantry.clearance ?? 5.8;
+    const height = gantry.height ?? 7.4;
+    const postOffset = ROAD_WIDTH / 2 + (gantry.postOffset ?? 2.8);
+    const span = postOffset * 2;
+    const acrossYaw = Math.atan2(-normal.y, normal.x);
+    const boardYaw = Math.atan2(tangent.x, tangent.y) + Math.PI / 2;
+    const group = new THREE.Group();
+    const postGeometry = new THREE.BoxGeometry(0.38, height, 0.38);
+    const beamGeometry = new THREE.BoxGeometry(span + 1.2, 0.42, 0.48);
+    const signGeometry = new THREE.BoxGeometry(Math.min(span - 2, gantry.signWidth ?? 12), 1.25, 0.16);
+    const signMaterial = new THREE.MeshBasicMaterial({
+      map: makeTrackSignTexture(
+        gantry.text ?? activeCourse.menuLabel ?? "GP",
+        gantry.background ?? (activeCourse.visualProfile === "spaArdennes" ? 0xf3ca21 : 0x057643),
+        gantry.foreground ?? 0x101214,
+        gantry.accent ?? (activeCourse.visualProfile === "spaArdennes" ? 0xd72f25 : 0xf7f3de),
+      ),
+    });
+
+    for (const side of [-1, 1]) {
+      const base = point.clone().addScaledVector(normal, side * postOffset);
+      const groundY = getTrackElevation(base.x, base.y);
+      const post = new THREE.Mesh(postGeometry, postMaterial);
+      post.position.set(base.x, groundY + height / 2, base.y);
+      post.castShadow = true;
+      post.receiveShadow = true;
+      group.add(post);
+    }
+
+    const centerY = getTrackElevation(point.x, point.y);
+    const beam = new THREE.Mesh(beamGeometry, trussMaterial);
+    beam.position.set(point.x, centerY + roadClearance + 1.18, point.y);
+    beam.rotation.y = acrossYaw;
+    beam.castShadow = true;
+    beam.receiveShadow = true;
+    group.add(beam);
+
+    const sign = new THREE.Mesh(signGeometry, signMaterial);
+    sign.position.set(point.x, centerY + roadClearance + 0.38, point.y);
+    sign.rotation.y = boardYaw;
+    sign.renderOrder = 14;
+    group.add(sign);
+
+    scene.add(group);
+  }
+}
+
+function createTracksideCatchFences() {
+  const zones = activeCourse.catchFenceZones ?? [];
+  if (!zones.length) return;
+
+  const fenceMaterial = new THREE.MeshStandardMaterial({
+    color: activeCourse.visualProfile === "monacoStreet" ? 0xd4dad5 : 0xc4cbc6,
+    roughness: 0.34,
+    metalness: 0.52,
+    transparent: true,
+    opacity: 0.42,
+    side: THREE.DoubleSide,
+  });
+  const postMaterial = new THREE.MeshStandardMaterial({ color: 0x737b78, roughness: 0.48, metalness: 0.46 });
+  const panelGeometry = new THREE.BoxGeometry(1, 1, 0.055);
+  const postGeometry = new THREE.BoxGeometry(0.12, 1, 0.12);
+  const panelMatrices = [];
+  const postMatrices = [];
+
+  for (const zone of zones) {
+    const sides = zone.sides ?? [zone.side ?? 1];
+    const indices = getTrackSectionIndices(zone.start, zone.end, zone.step ?? 5);
+    const height = zone.height ?? 2.7;
+
+    for (const side of sides) {
+      const offset = zone.offset ?? getRoadsideObjectOffset(1.2);
+
+      for (let i = 0; i < indices.length - 1; i += 1) {
+        const startIndex = indices[i];
+        const endIndex = indices[i + 1];
+        const a = getOffsetTrackPoint(startIndex, side * offset);
+        const b = getOffsetTrackPoint(endIndex, side * offset);
+        const dx = b.x - a.x;
+        const dz = b.y - a.y;
+        const length = Math.hypot(dx, dz);
+        if (length < 1.1 || isTrackCorridorBlockedBySegment(a, b, startIndex, ROAD_WIDTH / 2 + 0.45)) continue;
+
+        const angle = Math.atan2(-dz, dx);
+        const y = (getTrackElevation(a.x, a.y) + getTrackElevation(b.x, b.y)) / 2;
+        panelMatrices.push(makeTransformMatrix((a.x + b.x) / 2, y + 1.0 + height / 2, (a.y + b.y) / 2, angle, length, height, 1));
+
+        if (i % 2 === 0) {
+          postMatrices.push(makeTransformMatrix(a.x, getTrackElevation(a.x, a.y) + 1.0 + height / 2, a.y, angle, 1, height + 0.55, 1));
+        }
+      }
+    }
+  }
+
+  addInstancedMesh(panelGeometry, fenceMaterial, panelMatrices, true);
+  addInstancedMesh(postGeometry, postMaterial, postMatrices, true);
+}
+
+function createMonacoWallPanels() {
+  const zones = activeCourse.wallPanelZones ?? [];
+  if (!zones.length) return;
+
+  for (const zone of zones) {
+    const sides = zone.sides ?? [zone.side ?? 1];
+    const indices = getTrackSectionIndices(zone.start, zone.end, zone.step ?? 9);
+    const texts = zone.texts ?? [zone.text ?? "MONACO"];
+    const material = new THREE.MeshBasicMaterial({
+      map: makeTrackSignTexture(
+        texts[0],
+        zone.background ?? 0x07905c,
+        zone.foreground ?? 0xf6f2df,
+        zone.accent ?? 0xf6f2df,
+      ),
+      side: THREE.DoubleSide,
+    });
+
+    for (let indexPosition = 0; indexPosition < indices.length; indexPosition += 1) {
+      const index = indices[indexPosition];
+      const point = trackPoints[index];
+      const normal = getTrackNormal(index);
+      const tangent = getTrackTangent(index);
+
+      for (const side of sides) {
+        const base = point.clone().addScaledVector(
+          normal,
+          side * (ROAD_WIDTH / 2 + (activeCourse.wallOffset ?? 0.55) + (activeCourse.wallThickness ?? 0.5) * 0.5 + 0.08),
+        );
+        const panel = new THREE.Mesh(new THREE.PlaneGeometry(zone.width ?? 5.4, zone.height ?? 0.86), material);
+        panel.position.set(base.x, getTrackElevation(base.x, base.y) + (zone.y ?? 1.16), base.y);
+        panel.rotation.y = Math.atan2(-normal.x * side, -normal.y * side);
+        panel.renderOrder = 15;
+        panel.castShadow = true;
+        scene.add(panel);
+
+        if (texts.length > 1 && indexPosition % texts.length !== 0) {
+          const textIndex = indexPosition % texts.length;
+          panel.material = new THREE.MeshBasicMaterial({
+            map: makeTrackSignTexture(
+              texts[textIndex],
+              zone.background ?? 0x07905c,
+              zone.foreground ?? 0xf6f2df,
+              zone.accent ?? 0xf6f2df,
+            ),
+            side: THREE.DoubleSide,
+          });
+        }
+      }
     }
   }
 }
@@ -2758,6 +3054,7 @@ function createCityBlocks() {
       const width = 10 + Math.floor(seed * 5);
       const depth = 9 + Math.floor(((seed * 17) % 1) * 7);
       const height = 10 + Math.floor(((seed * 31) % 1) * 36);
+      if (!isRectFootprintClearOfTrack(x, z, width, depth, 0, 4.2)) continue;
       const baseY = getTrackElevation(x, z);
       const building = new THREE.Mesh(
         new THREE.BoxGeometry(width, height, depth),
@@ -4383,13 +4680,16 @@ function createRibbonMesh(width, y, material, centerOffset = 0, crossSegments = 
 }
 
 function addCurbRibbons(side) {
+  const curbColors = activeCourse.curbColors ?? {};
+  const primaryColor = curbColors.primary ?? 0xc9352c;
+  const secondaryColor = curbColors.secondary ?? 0xf4f4ec;
   const red = makeCurbGeometry(side, 0);
   const white = makeCurbGeometry(side, 1);
 
   const redMesh = new THREE.Mesh(
     red,
     new THREE.MeshBasicMaterial({
-      color: side > 0 ? 0xc9352c : 0xf4f4ec,
+      color: primaryColor,
       side: THREE.DoubleSide,
       polygonOffset: true,
       polygonOffsetFactor: -6,
@@ -4399,7 +4699,7 @@ function addCurbRibbons(side) {
   const whiteMesh = new THREE.Mesh(
     white,
     new THREE.MeshBasicMaterial({
-      color: side > 0 ? 0xf4f4ec : 0xc9352c,
+      color: secondaryColor,
       side: THREE.DoubleSide,
       polygonOffset: true,
       polygonOffsetFactor: -6,
@@ -4545,6 +4845,31 @@ function isRoadsideObjectClear(x, z, radius = 0, buffer = 0.8) {
   return !isNearTrack(x, z, getRoadsideObjectOffset(radius + buffer));
 }
 
+function isRectFootprintClearOfTrack(x, z, width, depth, yaw = 0, buffer = 1.2) {
+  const halfWidth = Math.max(width, 0.1) / 2;
+  const halfDepth = Math.max(depth, 0.1) / 2;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const clearance = ROAD_WIDTH / 2 + buffer;
+  const samples = [
+    [0, 0],
+    [-halfWidth, -halfDepth],
+    [halfWidth, -halfDepth],
+    [-halfWidth, halfDepth],
+    [halfWidth, halfDepth],
+    [0, -halfDepth],
+    [0, halfDepth],
+    [-halfWidth, 0],
+    [halfWidth, 0],
+  ];
+
+  return samples.every(([localX, localZ]) => {
+    const sampleX = x + localX * cos + localZ * sin;
+    const sampleZ = z - localX * sin + localZ * cos;
+    return !isNearTrack(sampleX, sampleZ, clearance);
+  });
+}
+
 function getSurfaceGripAt(x, z) {
   if (activeCourse.environment !== "mountain") return 1;
 
@@ -4556,6 +4881,9 @@ function getSurfaceGripAt(x, z) {
   const runoff = getRunoffZoneAt(progress, distance);
 
   if (distance <= asphaltEdge) return 1;
+  if (Number.isFinite(runoff?.grip)) return runoff.grip;
+  if (runoff?.material === "asphalt" || runoff?.material === "concrete") return 0.88;
+  if (String(runoff?.material ?? "").startsWith("painted")) return 0.82;
   if (runoff?.material === "gravel") return 0.46;
   if (runoff?.material === "grass") return 0.6;
 
