@@ -99,9 +99,9 @@ const BRIDGE_ROUTES = [
 const TRACK_SURFACE_OFFSET = 0.065;
 const MAX_FORWARD_SPEED = 200 / 3.6;
 const STEERING_INPUT_RESPONSE = {
-  keyboard: 1.65,
-  analog: 3.45,
-  return: 4.7,
+  keyboard: 3.05,
+  analog: 5.15,
+  return: 6.35,
 };
 const STEERING_INPUT_CURVE = {
   keyboard: 1,
@@ -323,7 +323,8 @@ const TIRE_MARK_HOLD_SECONDS = 5;
 const TIRE_MARK_FADE_SECONDS = 3;
 const BRAKE_TRAIL_HOLD_SECONDS = 5;
 const BRAKE_TRAIL_FADE_SECONDS = 2.2;
-const VEHICLE_COLLISION_RADIUS = 2.35;
+const BRAKE_TRAIL_MAX_SEGMENTS = 720;
+const VEHICLE_COLLISION_RADIUS = 2.85;
 const VEHICLE_COLLISION_COOLDOWN_MS = 260;
 const VEHICLE_DEBRIS_LIFE_SECONDS = 5;
 const MULTIPLAYER_SEND_INTERVAL = 1000 / 20;
@@ -2363,7 +2364,7 @@ function isDriftBoostCar(carId = selectedCarId) {
 
 function createVehicle() {
   const physics = getActivePhysicsConfig();
-  const chassisShape = new CANNON.Box(new CANNON.Vec3(1.05, 0.34, 2.05));
+  const chassisShape = new CANNON.Box(new CANNON.Vec3(1.16, 0.42, 2.22));
   const chassisBody = new CANNON.Body({
     mass: physics.mass,
     material: carMaterial,
@@ -3459,7 +3460,7 @@ function drawMiniMapCheckpoints(context) {
 function drawMiniMapCar(context) {
   const tangent = new CANNON.Vec3(0, 0, 1);
   chassisBody.vectorToWorldFrame(tangent, tangent);
-  const angle = Math.atan2(tangent.x, tangent.z);
+  const angle = getMiniMapMarkerAngle(tangent.x, tangent.z);
   drawMiniMapVehicleMarker(context, chassisBody.position.x, chassisBody.position.z, angle, "#69c8ff");
 }
 
@@ -3468,7 +3469,7 @@ function drawMiniMapRemotePlayers(context) {
     if (remote.courseId && remote.courseId !== selectedCourseId) continue;
 
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(remote.renderQuaternion);
-    const angle = Math.atan2(forward.x, forward.z);
+    const angle = getMiniMapMarkerAngle(forward.x, forward.z);
     drawMiniMapVehicleMarker(
       context,
       remote.renderPosition.x,
@@ -3478,6 +3479,10 @@ function drawMiniMapRemotePlayers(context) {
       getMiniMapPlayerLabel(remote.displayName),
     );
   }
+}
+
+function getMiniMapMarkerAngle(forwardX, forwardZ) {
+  return Math.atan2(forwardX, -forwardZ);
 }
 
 function drawMiniMapVehicleMarker(context, x, z, angle, color, label = "") {
@@ -3522,7 +3527,7 @@ function getMiniMapPlayerLabel(displayName) {
 function mapToMiniMap(x, z) {
   return {
     x: miniMapState.width * 0.5 + (x - miniMapState.centerX) * miniMapState.scale,
-    y: miniMapState.height * 0.5 - (z - miniMapState.centerZ) * miniMapState.scale,
+    y: miniMapState.height * 0.5 + (z - miniMapState.centerZ) * miniMapState.scale,
   };
 }
 
@@ -4611,6 +4616,10 @@ function createOrUpdateRemotePlayer(player = {}) {
       lastUpdateAt: performance.now(),
       velocity: new THREE.Vector3(),
       steering: 0,
+      brake: 0,
+      speed: 0,
+      brakeTrailAccumulator: 0,
+      brakeTrailLastPoints: [null, null],
       nameLabel: null,
     };
     remotePlayers.set(player.id, remote);
@@ -4675,12 +4684,14 @@ function applyRemoteState(remote, state = {}, immediate = false) {
 
   remote.velocity.set(state.velocity?.x ?? 0, state.velocity?.y ?? 0, state.velocity?.z ?? 0);
   remote.steering = state.steering ?? 0;
+  remote.brake = THREE.MathUtils.clamp(state.brake ?? 0, 0, 1);
+  remote.speed = Math.max(0, state.speed ?? remote.velocity.length());
   remote.interpolationStart = performance.now();
   remote.interpolationDuration = REMOTE_INTERPOLATION_MS;
   remote.lastUpdateAt = performance.now();
 }
 
-function updateRemotePlayers() {
+function updateRemotePlayers(delta) {
   const now = performance.now();
 
   for (const remote of remotePlayers.values()) {
@@ -4699,6 +4710,8 @@ function updateRemotePlayers() {
     if (visualRoot) {
       visualRoot.rotation.z = THREE.MathUtils.clamp(-remote.steering * 0.1, -0.06, 0.06);
     }
+
+    emitRemoteBrakeLightTrails(remote, delta);
   }
 }
 
@@ -5868,7 +5881,7 @@ function emitBrakeLightTrails(delta) {
   brakeTrailAccumulator -= Math.floor(brakeTrailAccumulator);
   createBrakeLightTrail(-1, intensity);
   createBrakeLightTrail(1, intensity);
-  trimEffectArray(brakeLightTrails, 320);
+  trimEffectArray(brakeLightTrails, BRAKE_TRAIL_MAX_SEGMENTS);
 }
 
 function getBrakeTrailIndex(side) {
@@ -5899,6 +5912,66 @@ function createBrakeLightTrail(side, intensity) {
   brakeTrailLastPoints[index] = current.clone();
   if (!previous) return;
 
+  createBrakeLightTrailSegment(previous, current, side, intensity, getHorizontalVehicleForward());
+}
+
+function emitRemoteBrakeLightTrails(remote, delta) {
+  const brakeTrail = remote.brake > 0.05 && remote.speed > 2.2;
+  if (paused || !brakeTrail) {
+    resetRemoteBrakeTrailAnchors(remote);
+    return;
+  }
+
+  const intensity = THREE.MathUtils.lerp(0.52, 1, THREE.MathUtils.clamp(remote.brake, 0, 1));
+  remote.brakeTrailAccumulator += delta * THREE.MathUtils.lerp(12, 26, intensity);
+  if (remote.brakeTrailAccumulator < 1) return;
+
+  remote.brakeTrailAccumulator -= Math.floor(remote.brakeTrailAccumulator);
+  createRemoteBrakeLightTrail(remote, -1, intensity);
+  createRemoteBrakeLightTrail(remote, 1, intensity);
+  trimEffectArray(brakeLightTrails, BRAKE_TRAIL_MAX_SEGMENTS);
+}
+
+function resetRemoteBrakeTrailAnchors(remote) {
+  remote.brakeTrailAccumulator = 0;
+  remote.brakeTrailLastPoints[0] = null;
+  remote.brakeTrailLastPoints[1] = null;
+}
+
+function createRemoteBrakeLightTrail(remote, side, intensity) {
+  const index = getBrakeTrailIndex(side);
+  const forward = getRemoteHorizontalForward(remote);
+  const current = getRemoteBrakeLightWorldPosition(remote, side, forward);
+  const previous = remote.brakeTrailLastPoints[index];
+  remote.brakeTrailLastPoints[index] = current.clone();
+  if (!previous) return;
+
+  createBrakeLightTrailSegment(previous, current, side, intensity, forward);
+}
+
+function getRemoteBrakeLightWorldPosition(remote, side, forward = getRemoteHorizontalForward(remote)) {
+  const right = getRemoteHorizontalRight(remote);
+  const rearLight = remote.renderPosition
+    .clone()
+    .addScaledVector(right, side * 0.62)
+    .addScaledVector(forward, -2.12);
+  rearLight.y += 0.42;
+  return rearLight;
+}
+
+function getRemoteHorizontalForward(remote) {
+  const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(remote.renderQuaternion);
+  forward.y = 0;
+  return forward.lengthSq() > 0.0001 ? forward.normalize() : new THREE.Vector3(0, 0, 1);
+}
+
+function getRemoteHorizontalRight(remote) {
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(remote.renderQuaternion);
+  right.y = 0;
+  return right.lengthSq() > 0.0001 ? right.normalize() : new THREE.Vector3(1, 0, 0);
+}
+
+function createBrakeLightTrailSegment(previous, current, side, intensity, fallbackDirection = null) {
   const segment = current.clone().sub(previous);
   const length = segment.length();
   if (length < 0.045) return;
@@ -5906,7 +5979,9 @@ function createBrakeLightTrail(side, intensity) {
   const horizontalSegment = new THREE.Vector3(segment.x, 0, segment.z);
   const direction = horizontalSegment.lengthSq() > 0.0001
     ? horizontalSegment.normalize()
-    : getHorizontalVehicleForward();
+    : fallbackDirection?.lengthSq() > 0.0001
+      ? fallbackDirection.clone().normalize()
+      : getHorizontalVehicleForward();
 
   const trail = new THREE.Mesh(
     BRAKE_TRAIL_GEOMETRY,
@@ -7252,7 +7327,7 @@ function animate() {
     }
 
     updateVehicleMeshes(delta);
-    updateRemotePlayers();
+    updateRemotePlayers(delta);
     updateMiniMap();
     updateCamera(delta);
     if (skyDome) skyDome.position.copy(camera.position);

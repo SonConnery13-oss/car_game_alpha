@@ -14,6 +14,7 @@ const LOCAL_DOWN = new CANNON.Vec3(0, -1, 0);
 const LOCAL_FORWARD = new CANNON.Vec3(0, 0, 1);
 const WORLD_UP = new CANNON.Vec3(0, 1, 0);
 const EPSILON = 0.00001;
+const STEERING_RESPONSE_MULTIPLIER = 1.35;
 
 export const VEHICLE_PHYSICS_CONFIGS = {
   gt3: {
@@ -646,9 +647,9 @@ export class VehiclePhysics {
     const steerLimit = lerp(this.config.maxSteerAngle, this.config.maxSteerAngle * minSteerScale, speedFactor);
     const targetSteer = this.input.steer * steerLimit;
     const response =
-      Math.abs(targetSteer) < Math.abs(this.steeringAngle)
+      (Math.abs(targetSteer) < Math.abs(this.steeringAngle)
         ? this.config.steeringReturnResponse ?? this.config.steeringResponse
-        : this.config.steeringResponse;
+        : this.config.steeringResponse) * STEERING_RESPONSE_MULTIPLIER;
     const blend = 1 - Math.exp(-response * dt);
 
     this.steeringAngle += (targetSteer - this.steeringAngle) * blend;
