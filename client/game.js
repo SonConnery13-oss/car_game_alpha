@@ -223,7 +223,7 @@ let rankingsCourseId = selectedCourseId;
 let activeCourse = COURSE_DEFS[selectedCourseId];
 let skyDome = null;
 const ROAD_WIDTH = activeCourse.roadWidth ?? DEFAULT_ROAD_WIDTH;
-const START_GRID_WIDTH = Math.max(ROAD_WIDTH + 12, 24);
+const START_GRID_WIDTH = ROAD_WIDTH;
 const RACE_GRID_SPACING = 4.8;
 const RACE_GRID_ROW_SPACING = 5.8;
 const trackPoints = createTrackPoints(activeCourse);
@@ -1690,7 +1690,7 @@ function addCheckeredGate(group, gate, stripeMaterialA, stripeMaterialB, width =
   for (let i = 0; i < 8; i += 1) {
     const lateralOffset = -width / 2 + width / 16 + (i * width) / 8;
     const position = center.clone().addScaledVector(normal, lateralOffset);
-    const y = getTrackElevation(position.x, position.y) + TRACK_SURFACE_OFFSET + 0.14;
+    const y = getTrackElevation(position.x, position.y) + TRACK_SURFACE_OFFSET + 0.055;
     const stripe = new THREE.Mesh(
       new THREE.BoxGeometry(width / 8, 0.035, 1.05),
       i % 2 === 0 ? stripeMaterialA : stripeMaterialB,
