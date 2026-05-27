@@ -293,10 +293,12 @@ const carMaterial = new CANNON.Material("car");
 const barrierMaterial = new CANNON.Material("barrier");
 world.addContactMaterial(
   new CANNON.ContactMaterial(carMaterial, groundMaterial, {
-    friction: 0.62,
+    friction: 0.08,
     restitution: 0,
-    contactEquationStiffness: 1e6,
-    contactEquationRelaxation: 5,
+    contactEquationStiffness: 3.8e5,
+    contactEquationRelaxation: 8,
+    frictionEquationStiffness: 2.2e4,
+    frictionEquationRelaxation: 12,
   }),
 );
 world.addContactMaterial(
@@ -3567,15 +3569,39 @@ function createClouds() {
 }
 
 function getCarTuning() {
-  return CAR_MODELS[selectedCarId]?.tuning ?? CAR_MODELS.gt3.tuning;
+  const baseTuning = CAR_MODELS[selectedCarId]?.tuning ?? CAR_MODELS.gt3.tuning;
+  const overrides = {
+    ...(activeCourse.visualTuningOverrides?.all ?? {}),
+    ...(activeCourse.visualTuningOverrides?.[selectedCarId] ?? {}),
+  };
+
+  return Object.keys(overrides).length ? { ...baseTuning, ...overrides } : baseTuning;
 }
 
 function getMaxForwardSpeed() {
-  return vehiclePhysicsConfig.maxForwardSpeed ?? MAX_FORWARD_SPEED;
+  return vehicle?.config?.maxForwardSpeed ?? getActivePhysicsConfig().maxForwardSpeed ?? MAX_FORWARD_SPEED;
 }
 
 function getActivePhysicsConfig() {
-  return vehiclePhysicsConfig;
+  const overrides = {
+    ...(activeCourse.physicsOverrides?.all ?? {}),
+    ...(activeCourse.physicsOverrides?.[selectedCarId] ?? {}),
+  };
+
+  if (!Object.keys(overrides).length) return vehiclePhysicsConfig;
+
+  return {
+    ...vehiclePhysicsConfig,
+    ...overrides,
+    clutch: {
+      ...(vehiclePhysicsConfig.clutch ?? {}),
+      ...(overrides.clutch ?? {}),
+    },
+    inertia: {
+      ...(vehiclePhysicsConfig.inertia ?? {}),
+      ...(overrides.inertia ?? {}),
+    },
+  };
 }
 
 function modelIdUsesNarrowTire(modelId) {
@@ -6798,7 +6824,7 @@ function selectCar(carId) {
 
   selectedCarId = carId;
   vehiclePhysicsConfig = getVehiclePhysicsConfig(selectedCarId);
-  vehicle.configure(vehiclePhysicsConfig);
+  vehicle.configure(getActivePhysicsConfig());
   vehiclePhysics = vehicle;
   resetDriftBoost(true);
   replaceWheelMeshes();
@@ -6840,7 +6866,7 @@ function replaceWheelMeshes() {
   }
 
   for (let i = 0; i < vehicle.wheelInfos.length; i += 1) {
-    wheelMeshes.push(createWheelVisual(vehiclePhysicsConfig, i, selectedCarId));
+    wheelMeshes.push(createWheelVisual(getActivePhysicsConfig(), i, selectedCarId));
     wheelMeshMotion[i].initialized = false;
   }
 }
@@ -8082,6 +8108,11 @@ function updateDriftSmoke(delta) {
 }
 
 function handleChassisCollision(event) {
+  if (event.body?.material === groundMaterial && event.contact) {
+    softenChassisGroundContact(event.contact);
+    return;
+  }
+
   if (event.body?.userData?.type !== "barrier" || !event.contact) return;
 
   const contact = event.contact;
@@ -8110,6 +8141,24 @@ function handleChassisCollision(event) {
   const point = getBarrierContactPoint(contact);
   emitWallSparks(point, normal, tangentSpeed, impact);
   lastWallSparkAt = now;
+}
+
+function softenChassisGroundContact(contact) {
+  const normal = getBarrierContactNormal(contact);
+  if (!normal || normal.y < 0.22) return;
+
+  const impactSpeed = Math.max(0, -chassisBody.velocity.dot(normal));
+  if (impactSpeed < 1.2) return;
+
+  const pitchRollDamping = THREE.MathUtils.lerp(0.92, 0.68, THREE.MathUtils.clamp(impactSpeed / 12, 0, 1));
+  chassisBody.angularVelocity.x *= pitchRollDamping;
+  chassisBody.angularVelocity.z *= pitchRollDamping;
+  chassisBody.angularVelocity.y *= THREE.MathUtils.lerp(0.96, 0.82, THREE.MathUtils.clamp(impactSpeed / 16, 0, 1));
+
+  const maxRebound = THREE.MathUtils.lerp(3.1, 1.7, THREE.MathUtils.clamp(impactSpeed / 14, 0, 1));
+  if (chassisBody.velocity.y > maxRebound) {
+    chassisBody.velocity.y = maxRebound;
+  }
 }
 
 function getBarrierContactNormal(contact) {
@@ -8558,6 +8607,7 @@ function updateSuspensionVisual(delta) {
     highSpeedLeanGain;
   const time = performance.now() * 0.001;
   const surfaceShake = getSurfaceRipple(chassisBody.position.x + 3.7, chassisBody.position.z - 2.1) * 0.58;
+  const visualBodyMotionScale = tuning.visualBodyMotionScale ?? 1;
   const roadShake =
     contactRatio *
     roadShakeSpeedGain *
@@ -8566,18 +8616,23 @@ function updateSuspensionVisual(delta) {
   const airborneSag = grounded ? 0 : -0.025;
   const targetHeave =
     (-averageCompression * VISUAL_SUSPENSION.heaveScale + roadShake + airborneSag) *
-    (2 - tuning.visualStiffnessScale);
+    (2 - tuning.visualStiffnessScale) *
+    visualBodyMotionScale;
   const targetPitch =
-    (frontCompression - rearCompression) * VISUAL_SUSPENSION.pitchScale +
-    brakeDive +
-    handbrakePitch +
-    throttleSquat +
-    THREE.MathUtils.clamp(chassisBody.angularVelocity.x * 0.018, -0.08, 0.08);
+    (
+      (frontCompression - rearCompression) * VISUAL_SUSPENSION.pitchScale +
+      brakeDive +
+      handbrakePitch +
+      throttleSquat +
+      THREE.MathUtils.clamp(chassisBody.angularVelocity.x * 0.018, -0.08, 0.08)
+    ) * visualBodyMotionScale;
   const targetRoll =
-    (leftCompression - rightCompression) * VISUAL_SUSPENSION.rollScale +
-    steeringLean +
-    driftLean +
-    THREE.MathUtils.clamp(chassisBody.angularVelocity.z * 0.014, -0.07, 0.07);
+    (
+      (leftCompression - rightCompression) * VISUAL_SUSPENSION.rollScale +
+      steeringLean +
+      driftLean +
+      THREE.MathUtils.clamp(chassisBody.angularVelocity.z * 0.014, -0.07, 0.07)
+    ) * visualBodyMotionScale;
 
   if (grounded && !visualSuspension.wasGrounded) {
     const landingSpeed = Math.max(0, -vehicleDynamics.preStepVelocityY, -chassisBody.velocity.y);
@@ -8587,12 +8642,12 @@ function updateSuspensionVisual(delta) {
       0.18,
     );
     visualSuspension.pitchVelocity += THREE.MathUtils.clamp(
-      chassisBody.angularVelocity.x * 0.08,
+      chassisBody.angularVelocity.x * 0.08 * visualBodyMotionScale,
       -0.12,
       0.12,
     );
     visualSuspension.rollVelocity += THREE.MathUtils.clamp(
-      chassisBody.angularVelocity.z * 0.07,
+      chassisBody.angularVelocity.z * 0.07 * visualBodyMotionScale,
       -0.11,
       0.11,
     );

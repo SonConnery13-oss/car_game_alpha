@@ -25,6 +25,34 @@ export const MAP_SUSPENSION = {
   disableTrackWalls: true,
   disableTestArea: false,
   disableBridgeRoutes: true,
+  physicsOverrides: {
+    all: {
+      landingCompressionVelocity: 1.55,
+      landingDampingScale: 0.28,
+      landingBumpStopScale: 0.26,
+      landingSuspensionForceLimit: 2.05,
+    },
+    formulaRb22: {
+      suspensionRestLength: 0.27,
+      suspensionTravel: 0.16,
+      springStiffness: 132000,
+      damperStiffness: 13600,
+      bumpStopStiffness: 235000,
+      antiRollStiffness: 52000,
+      downforce: 2.4,
+      downforceLoadCap: 1.15,
+      aeroGripEfficiency: 0.7,
+      inertia: { linearDamping: 0.018, angularDamping: 0.62 },
+    },
+  },
+  visualTuningOverrides: {
+    formulaRb22: {
+      visualStiffnessScale: 0.58,
+      visualDampingScale: 1.72,
+      visualBodyMotionScale: 0.46,
+      cameraHeightOffset: -0.24,
+    },
+  },
   testArea: {
     x: 0,
     z: 188,
