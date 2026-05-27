@@ -69,6 +69,8 @@ export const MAP_SPA = {
   elevationAxis: { x: 0.72, z: 0.84 },
   elevationScale: 8.4,
   elevationReferenceSize: 920,
+  elevationWaveFrequencyScale: 0.64,
+  elevationFeatureRadiusScale: 1.48,
   ridgeScale: 2.15,
   sky: {
     topColor: 0x92b7d9,

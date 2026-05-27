@@ -33,6 +33,8 @@ export const MAP_MONACO = {
   },
   disableTestArea: true,
   disableBridgeRoutes: true,
+  adBoardYawOffset: Math.PI / 2,
+  gantrySignYawOffset: -Math.PI / 2,
   spawnOffset: -2.4,
   startGridWidth: 13.6,
   minCompletionTime: 9800,
@@ -67,6 +69,8 @@ export const MAP_MONACO = {
   },
   sun: { x: -78, y: 124, z: -38 },
   fogDensity: 0.0019,
+  elevationWaveFrequencyScale: 0.68,
+  elevationFeatureRadiusScale: 1.34,
   elevationBounds: { min: -4.0, max: 8.2 },
   elevationFeatures: [
     { x: -342, z: -154, height: 1.35, radiusX: 106, radiusZ: 70 },

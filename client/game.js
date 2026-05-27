@@ -510,16 +510,17 @@ function getTrackElevation(x, z) {
     return getMountainTrackElevation(x, z);
   }
 
+  const waveFrequencyScale = getElevationWaveFrequencyScale();
   const rollingGrade =
-    0.48 * Math.sin((z + 32) * 0.028) +
-    0.34 * Math.sin((x - 12) * 0.026 + z * 0.014);
+    0.48 * Math.sin((z + 32) * 0.028 * waveFrequencyScale) +
+    0.34 * Math.sin(((x - 12) * 0.026 + z * 0.014) * waveFrequencyScale);
   const northCrest = 0.72 * Math.exp(-((x + 18) ** 2) / 1700 - ((z - 56) ** 2) / 1200);
   const southDip = -0.46 * Math.exp(-((x - 24) ** 2) / 950 - ((z + 62) ** 2) / 1050);
   const longRise = 0.56 * Math.exp(-((z - 8) ** 2) / 4200) * Math.cos(x * 0.032);
   const westDrop = -0.34 * Math.exp(-((x + 78) ** 2) / 1200 - ((z + 32) ** 2) / 2200);
   const eastCrest = 0.44 * Math.exp(-((x - 58) ** 2) / 1700 - ((z + 76) ** 2) / 1600);
   const startDistance = Math.hypot(x - START_X, z - START_Z);
-  const startBlend = smoothstep(5, 18, startDistance);
+  const startBlend = smootherstep(5, 24, startDistance);
   const jumpRamp = getJumpRampElevation(x, z);
   const testArea = getTestAreaElevation(x, z);
   const courseFeatures = getCourseFeatureElevation(x, z);
@@ -545,10 +546,11 @@ function getMountainTrackElevation(x, z) {
   const grade = ((x * normalizedAxisX + z * normalizedAxisZ) / (elevationReferenceSize / 2)) *
     (activeCourse.elevationScale ?? 2.8);
   const startDistance = Math.hypot(x - START_X, z - START_Z);
-  const startBlend = smoothstep(5, 18, startDistance);
+  const waveFrequencyScale = getElevationWaveFrequencyScale();
+  const startBlend = smootherstep(5, 24, startDistance);
   const ridge =
-    0.62 * Math.sin(x * 0.018 + z * 0.035) +
-    0.38 * Math.sin(x * 0.046 - z * 0.022);
+    0.62 * Math.sin((x * 0.018 + z * 0.035) * waveFrequencyScale) +
+    0.38 * Math.sin((x * 0.046 - z * 0.022) * waveFrequencyScale);
   const shoulderCrown =
     0.48 * Math.exp(-((x + 110) ** 2) / 3600 - ((z - 70) ** 2) / 5200) -
     0.32 * Math.exp(-((x - 120) ** 2) / 4200 - ((z + 110) ** 2) / 4800);
@@ -565,16 +567,26 @@ function getMountainTrackElevation(x, z) {
 
 function getCourseFeatureElevation(x, z) {
   let elevation = 0;
+  const radiusScale = activeCourse.elevationFeatureRadiusScale ??
+    (activeCourse.visualProfile === "spaArdennes" ? 1.36 : activeCourse.visualProfile === "monacoStreet" ? 1.28 : 1.16);
 
   for (const feature of activeCourse.elevationFeatures ?? []) {
-    const radiusX = Math.max(feature.radiusX ?? feature.radius ?? 1, 1);
-    const radiusZ = Math.max(feature.radiusZ ?? feature.radius ?? 1, 1);
+    const radiusX = Math.max(feature.radiusX ?? feature.radius ?? 1, 1) * radiusScale;
+    const radiusZ = Math.max(feature.radiusZ ?? feature.radius ?? 1, 1) * radiusScale;
     const dx = (x - feature.x) / radiusX;
     const dz = (z - feature.z) / radiusZ;
     elevation += feature.height * Math.exp(-(dx * dx + dz * dz));
   }
 
   return elevation;
+}
+
+function getElevationWaveFrequencyScale() {
+  if (Number.isFinite(activeCourse.elevationWaveFrequencyScale)) {
+    return activeCourse.elevationWaveFrequencyScale;
+  }
+
+  return activeCourse.environment === "mountain" ? 0.72 : 0.76;
 }
 
 function getTestAreaElevation(x, z) {
@@ -697,6 +709,11 @@ function getTerrainNormal(x, z) {
 function smoothstep(edge0, edge1, value) {
   const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function smootherstep(edge0, edge1, value) {
+  const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
 function pseudoRandom(seed) {
