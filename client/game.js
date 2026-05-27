@@ -519,6 +519,7 @@ function getTrackElevation(x, z) {
   }
 
   const waveFrequencyScale = getElevationWaveFrequencyScale();
+  const baseScale = activeCourse.elevationBaseScale ?? 1;
   const rollingGrade =
     0.48 * Math.sin((z + 32) * 0.028 * waveFrequencyScale) +
     0.34 * Math.sin(((x - 12) * 0.026 + z * 0.014) * waveFrequencyScale);
@@ -535,7 +536,7 @@ function getTrackElevation(x, z) {
   const roadRipple = getSurfaceRipple(x, z) * startBlend;
 
   return applyStartFlattening(softClampElevation(
-    (rollingGrade + northCrest + southDip + longRise + westDrop + eastCrest) * startBlend +
+    (rollingGrade + northCrest + southDip + longRise + westDrop + eastCrest) * baseScale * startBlend +
       jumpRamp +
       testArea +
       courseFeatures +
@@ -551,8 +552,10 @@ function getMountainTrackElevation(x, z) {
   const normalizedAxisX = axis.x / axisLength;
   const normalizedAxisZ = axis.z / axisLength;
   const elevationReferenceSize = activeCourse.elevationReferenceSize ?? 560;
+  const gradeScale = activeCourse.elevationGradeScale ?? 1;
   const grade = ((x * normalizedAxisX + z * normalizedAxisZ) / (elevationReferenceSize / 2)) *
-    (activeCourse.elevationScale ?? 2.8);
+    (activeCourse.elevationScale ?? 2.8) *
+    gradeScale;
   const startDistance = Math.hypot(x - START_X, z - START_Z);
   const waveFrequencyScale = getElevationWaveFrequencyScale();
   const startBlend = smootherstep(5, 24, startDistance);
@@ -579,13 +582,14 @@ function getCourseFeatureElevation(x, z) {
     (activeCourse.visualProfile === "spaArdennes" ? 1.36 : activeCourse.visualProfile === "monacoStreet" ? 1.28 : 1.16);
   const falloffPower = activeCourse.elevationFeatureFalloffPower ??
     (activeCourse.visualProfile === "spaArdennes" ? 0.72 : activeCourse.visualProfile === "monacoStreet" ? 0.76 : 0.84);
+  const heightScale = activeCourse.elevationFeatureHeightScale ?? 1;
 
   for (const feature of activeCourse.elevationFeatures ?? []) {
     const radiusX = Math.max(feature.radiusX ?? feature.radius ?? 1, 1) * radiusScale;
     const radiusZ = Math.max(feature.radiusZ ?? feature.radius ?? 1, 1) * radiusScale;
     const dx = (x - feature.x) / radiusX;
     const dz = (z - feature.z) / radiusZ;
-    elevation += feature.height * Math.exp(-Math.pow(dx * dx + dz * dz, falloffPower));
+    elevation += feature.height * heightScale * Math.exp(-Math.pow(dx * dx + dz * dz, falloffPower));
   }
 
   return elevation;
@@ -634,13 +638,18 @@ function getElevationWaveFrequencyScale() {
 function getTestAreaElevation(x, z) {
   if (activeCourse.disableTestArea) return 0;
 
-  const localX = x - TEST_AREA.x;
-  const localZ = z - TEST_AREA.z;
-  const halfWidth = TEST_AREA.width / 2;
-  const halfDepth = TEST_AREA.depth / 2;
+  const testArea = getActiveTestArea();
+  const localX = x - testArea.x;
+  const localZ = z - testArea.z;
+  const halfWidth = testArea.width / 2;
+  const halfDepth = testArea.depth / 2;
 
   if (Math.abs(localX) > halfWidth || Math.abs(localZ) > halfDepth) {
     return 0;
+  }
+
+  if (activeCourse.visualProfile === "suspensionTest") {
+    return getSuspensionTestElevation(localX, localZ, halfWidth, halfDepth);
   }
 
   const edgeFade =
@@ -751,6 +760,56 @@ function getTerrainNormal(x, z) {
 function smoothstep(edge0, edge1, value) {
   const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function getActiveTestArea() {
+  return activeCourse.testArea ?? TEST_AREA;
+}
+
+function getSuspensionTestElevation(localX, localZ, halfWidth, halfDepth) {
+  const edgeFade =
+    smootherstep(halfWidth, halfWidth - 16, Math.abs(localX)) *
+    smootherstep(halfDepth, halfDepth - 16, Math.abs(localZ));
+  let elevation = 0;
+
+  for (const bump of activeCourse.suspensionBumpRows ?? []) {
+    const sideFade = smootherstep(bump.width * 0.5, bump.width * 0.38, Math.abs(localX - bump.x));
+    for (let z = bump.zStart; z <= bump.zEnd; z += bump.step) {
+      elevation += bump.height * Math.exp(-((localZ - z) ** 2) / (bump.depth ** 2)) * sideFade;
+    }
+  }
+
+  for (const ramp of activeCourse.suspensionRamps ?? []) {
+    elevation = Math.max(elevation, getSuspensionRampElevation(localX, localZ, ramp));
+  }
+
+  for (const pad of activeCourse.suspensionLandingPads ?? []) {
+    const dx = (localX - pad.x) / pad.radiusX;
+    const dz = (localZ - pad.z) / pad.radiusZ;
+    elevation += pad.height * Math.exp(-(dx * dx + dz * dz));
+  }
+
+  return elevation * edgeFade;
+}
+
+function getSuspensionRampElevation(localX, localZ, ramp) {
+  const yaw = ramp.yaw ?? 0;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const dx = localX - ramp.x;
+  const dz = localZ - ramp.z;
+  const forward = dx * sin + dz * cos;
+  const side = dx * cos - dz * sin;
+  const halfLength = ramp.length / 2;
+  const halfWidth = ramp.width / 2;
+
+  if (forward < -halfLength || forward > halfLength || Math.abs(side) > halfWidth) return 0;
+
+  const t = (forward + halfLength) / ramp.length;
+  const sideFade = smootherstep(halfWidth, halfWidth * 0.72, Math.abs(side));
+  const launchShape = smootherstep(0.04, 0.82, t);
+  const lip = Math.max(0, Math.sin(Math.PI * smootherstep(0.78, 1, t))) * (ramp.lip ?? 0.34);
+  return Math.max(0, ramp.height * (launchShape + lip) * sideFade);
 }
 
 function smootherstep(edge0, edge1, value) {
@@ -915,6 +974,11 @@ function createTerrainGeometry(size, segments, yOffset = 0) {
 }
 
 function createTrack() {
+  if (activeCourse.freeDriveArea) {
+    createSuspensionFreeDriveSurface();
+    return;
+  }
+
   const asphaltTexture = makeAsphaltTexture(activeCourse.asphalt);
   asphaltTexture.repeat.set(1, activeCourse.asphalt?.repeat ?? 30);
   const roadColor = activeCourse.asphalt?.color ?? (activeCourse.environment === "mountain" ? 0x25282a : 0x1d2022);
@@ -922,8 +986,10 @@ function createTrack() {
   const roadMaterial = new THREE.MeshStandardMaterial({
     map: asphaltTexture,
     color: roadColor,
-    roughness: 0.84,
-    metalness: 0.02,
+    roughness: activeCourse.asphalt?.roughness ?? 0.84,
+    metalness: activeCourse.asphalt?.metalness ?? 0.02,
+    emissive: activeCourse.asphalt?.emissive ?? 0x000000,
+    emissiveIntensity: activeCourse.asphalt?.emissiveIntensity ?? 0,
     polygonOffset: true,
     polygonOffsetFactor: -1.5,
     polygonOffsetUnits: -1.5,
@@ -1301,6 +1367,8 @@ function createBarriers() {
 }
 
 function createLowTrackWalls() {
+  if (activeCourse.disableTrackWalls) return;
+
   if (activeCourse.environment === "mountain" || activeCourse.guardRails?.replaceLowWalls) {
     createMountainGuardRails();
     return;
@@ -1728,6 +1796,8 @@ function createLowWallSegment(a, b, material, height = 0.52, thickness = 0.34, e
 }
 
 function createStartLine() {
+  if (activeCourse.hideStartLine) return;
+
   const group = new THREE.Group();
   const stripeMaterialA = new THREE.MeshBasicMaterial({ color: 0xf7f7f2 });
   const stripeMaterialB = new THREE.MeshBasicMaterial({ color: 0x111416 });
@@ -1741,6 +1811,8 @@ function createStartLine() {
 }
 
 function createCheckpointMarkers() {
+  if (activeCourse.hideCheckpointMarkers) return;
+
   const checkpointIndices = getCheckpointIndices();
   if (!checkpointIndices.length) return;
 
@@ -1829,6 +1901,12 @@ function addCheckeredGate(group, gate, stripeMaterialA, stripeMaterialB, width =
 }
 
 function createScenery() {
+  if (activeCourse.visualProfile === "suspensionTest") {
+    createSuspensionTestArea();
+    createClouds();
+    return;
+  }
+
   if (!activeCourse.disableTestArea) {
     createTestArea();
   }
@@ -3113,6 +3191,172 @@ function createTestArea() {
     { x: TEST_AREA.x + 58, z: TEST_AREA.z + 12, width: 12, length: 32 },
   ], redMaterial, whiteMaterial);
   createTestAreaLowWalls();
+}
+
+function createSuspensionFreeDriveSurface() {
+  const area = getActiveTestArea();
+  const asphaltTexture = makeAsphaltTexture(activeCourse.asphalt);
+  asphaltTexture.repeat.set(2.8, 2.1);
+  const padMaterial = new THREE.MeshStandardMaterial({
+    map: asphaltTexture,
+    color: activeCourse.asphalt?.color ?? 0x1b1d1f,
+    roughness: activeCourse.asphalt?.roughness ?? 0.88,
+    metalness: activeCourse.asphalt?.metalness ?? 0,
+    polygonOffset: true,
+    polygonOffsetFactor: -1.2,
+    polygonOffsetUnits: -1.2,
+  });
+  const pad = createTestPadSurface(area, padMaterial, TRACK_SURFACE_OFFSET + 0.04, 116, 82);
+  pad.receiveShadow = true;
+  pad.renderOrder = 2;
+  scene.add(pad);
+}
+
+function createTestPadSurface(area, material, yOffset, segmentsX, segmentsZ) {
+  const vertices = [];
+  const uvs = [];
+  const indices = [];
+  const halfWidth = area.width / 2;
+  const halfDepth = area.depth / 2;
+
+  for (let zIndex = 0; zIndex <= segmentsZ; zIndex += 1) {
+    const z = area.z - halfDepth + (zIndex / segmentsZ) * area.depth;
+
+    for (let xIndex = 0; xIndex <= segmentsX; xIndex += 1) {
+      const x = area.x - halfWidth + (xIndex / segmentsX) * area.width;
+      vertices.push(x, getTrackElevation(x, z) + yOffset, z);
+      uvs.push(xIndex / segmentsX, zIndex / segmentsZ);
+    }
+  }
+
+  for (let zIndex = 0; zIndex < segmentsZ; zIndex += 1) {
+    for (let xIndex = 0; xIndex < segmentsX; xIndex += 1) {
+      const a = zIndex * (segmentsX + 1) + xIndex;
+      const b = a + 1;
+      const c = a + segmentsX + 1;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return new THREE.Mesh(geometry, material);
+}
+
+function createSuspensionTestArea() {
+  const area = getActiveTestArea();
+  const halfWidth = area.width / 2;
+  const halfDepth = area.depth / 2;
+  const whiteMaterial = new THREE.MeshBasicMaterial({
+    color: 0xf4f2e8,
+    polygonOffset: true,
+    polygonOffsetFactor: -6,
+    polygonOffsetUnits: -6,
+  });
+  const yellowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xf0c748,
+    polygonOffset: true,
+    polygonOffsetFactor: -7,
+    polygonOffsetUnits: -7,
+  });
+  const redMaterial = new THREE.MeshBasicMaterial({
+    color: 0xd9342c,
+    polygonOffset: true,
+    polygonOffsetFactor: -8,
+    polygonOffsetUnits: -8,
+  });
+  const darkMaterial = new THREE.MeshStandardMaterial({
+    color: 0x101214,
+    roughness: 0.86,
+    polygonOffset: true,
+    polygonOffsetFactor: -5,
+    polygonOffsetUnits: -5,
+  });
+  const coneMaterial = new THREE.MeshStandardMaterial({ color: 0xff7a2d, roughness: 0.72 });
+
+  createSuspensionBoundaryLines(area, whiteMaterial, yellowMaterial);
+  createSuspensionBumpMarkers(area, darkMaterial, yellowMaterial);
+  createSuspensionRampMarkers(area, redMaterial, whiteMaterial, yellowMaterial);
+
+  for (let z = area.z - halfDepth + 18; z <= area.z + halfDepth - 18; z += 30) {
+    for (const x of [area.x - halfWidth + 16, area.x + halfWidth - 16]) {
+      const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.7, 1.1, 12), coneMaterial);
+      cone.position.set(x, getTrackElevation(x, z) + 0.58, z);
+      cone.castShadow = true;
+      scene.add(cone);
+    }
+  }
+}
+
+function createSuspensionBoundaryLines(area, whiteMaterial, yellowMaterial) {
+  const halfWidth = area.width / 2;
+  const halfDepth = area.depth / 2;
+  const lines = [
+    { x: area.x, z: area.z - halfDepth + 1.2, width: area.width, depth: 0.36, material: yellowMaterial },
+    { x: area.x, z: area.z + halfDepth - 1.2, width: area.width, depth: 0.36, material: yellowMaterial },
+    { x: area.x - halfWidth + 1.2, z: area.z, width: 0.36, depth: area.depth, material: whiteMaterial },
+    { x: area.x + halfWidth - 1.2, z: area.z, width: 0.36, depth: area.depth, material: whiteMaterial },
+  ];
+
+  for (const line of lines) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(line.width, 0.032, line.depth), line.material);
+    mesh.position.set(line.x, getTrackElevation(line.x, line.z) + TRACK_SURFACE_OFFSET + 0.12, line.z);
+    mesh.renderOrder = 8;
+    scene.add(mesh);
+  }
+}
+
+function createSuspensionBumpMarkers(area, darkMaterial, yellowMaterial) {
+  for (const bump of activeCourse.suspensionBumpRows ?? []) {
+    for (let z = bump.zStart; z <= bump.zEnd; z += bump.step) {
+      const x = area.x + bump.x;
+      const worldZ = area.z + z;
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(bump.width, 0.05, Math.max(0.3, bump.depth * 1.2)), darkMaterial);
+      strip.position.set(x, getTrackElevation(x, worldZ) + TRACK_SURFACE_OFFSET + 0.16, worldZ);
+      strip.receiveShadow = true;
+      strip.castShadow = true;
+      strip.renderOrder = 9;
+      scene.add(strip);
+    }
+
+    const centerZ = area.z + (bump.zStart + bump.zEnd) * 0.5;
+    const guide = new THREE.Mesh(new THREE.BoxGeometry(bump.width + 7, 0.035, 0.3), yellowMaterial);
+    guide.position.set(area.x + bump.x, getTrackElevation(area.x + bump.x, centerZ) + TRACK_SURFACE_OFFSET + 0.18, centerZ);
+    guide.renderOrder = 10;
+    scene.add(guide);
+  }
+}
+
+function createSuspensionRampMarkers(area, redMaterial, whiteMaterial, yellowMaterial) {
+  for (const ramp of activeCourse.suspensionRamps ?? []) {
+    const yaw = ramp.yaw ?? 0;
+    const forward = new THREE.Vector2(Math.sin(yaw), Math.cos(yaw));
+    const right = new THREE.Vector2(Math.cos(yaw), -Math.sin(yaw));
+    const origin = new THREE.Vector2(area.x + ramp.x, area.z + ramp.z);
+
+    for (const side of [-1, 1]) {
+      const center = origin.clone().addScaledVector(right, side * ramp.width * 0.52);
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.055, ramp.length), redMaterial);
+      edge.position.set(center.x, getTrackElevation(center.x, center.y) + TRACK_SURFACE_OFFSET + 0.18, center.y);
+      edge.rotation.y = yaw;
+      edge.renderOrder = 11;
+      scene.add(edge);
+    }
+
+    for (let stripe = 0; stripe < 7; stripe += 1) {
+      const localForward = -ramp.length * 0.34 + stripe * (ramp.length * 0.105);
+      const center = origin.clone().addScaledVector(forward, localForward);
+      const marker = new THREE.Mesh(new THREE.BoxGeometry(ramp.width * 0.74, 0.05, 0.62), stripe % 2 ? whiteMaterial : yellowMaterial);
+      marker.position.set(center.x, getTrackElevation(center.x, center.y) + TRACK_SURFACE_OFFSET + 0.2, center.y);
+      marker.rotation.y = yaw + Math.PI / 2;
+      marker.renderOrder = 12;
+      scene.add(marker);
+    }
+  }
 }
 
 function createCurvedRampMarkers(ramps, redMaterial, whiteMaterial) {
@@ -9351,7 +9595,8 @@ function makeAsphaltTexture(options = {}) {
 
   for (let i = 0; i < 6200; i += 1) {
     const shade = (options.fleckMin ?? 24) + Math.floor(Math.random() * (options.fleckRange ?? 38));
-    context.fillStyle = `rgba(${shade}, ${shade + 2}, ${shade + 3}, ${0.22 + Math.random() * 0.18})`;
+    const opacity = (options.fleckOpacityMin ?? 0.22) + Math.random() * (options.fleckOpacityRange ?? 0.18);
+    context.fillStyle = `rgba(${shade}, ${shade + 2}, ${shade + 3}, ${opacity})`;
     context.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 2, 1);
   }
 
