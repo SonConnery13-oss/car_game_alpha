@@ -1237,7 +1237,7 @@ function createBarriers() {
 }
 
 function createLowTrackWalls() {
-  if (activeCourse.environment === "mountain") {
+  if (activeCourse.environment === "mountain" || activeCourse.guardRails?.replaceLowWalls) {
     createMountainGuardRails();
     return;
   }
@@ -2036,6 +2036,8 @@ function createYacht(x, y, z, yaw) {
 }
 
 function createMonacoBarrierStripes() {
+  if (activeCourse.guardRails?.replaceLowWalls) return;
+
   const stripeMaterial = new THREE.MeshBasicMaterial({
     color: 0xd52f2f,
     transparent: true,
@@ -2417,6 +2419,8 @@ function createTracksideCatchFences() {
 }
 
 function createMonacoWallPanels() {
+  if (activeCourse.guardRails?.replaceLowWalls) return;
+
   const zones = activeCourse.wallPanelZones ?? [];
   if (!zones.length) return;
 
