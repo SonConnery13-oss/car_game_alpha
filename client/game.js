@@ -531,8 +531,8 @@ function getTrackElevation(x, z) {
       testArea +
       courseFeatures +
       roadRipple,
-    -0.85,
-    activeCourse.visualProfile === "monacoStreet" ? 3.1 : 2.4,
+    activeCourse.elevationBounds?.min ?? -0.85,
+    activeCourse.elevationBounds?.max ?? (activeCourse.visualProfile === "monacoStreet" ? 3.1 : 2.4),
   );
 }
 
@@ -558,8 +558,8 @@ function getMountainTrackElevation(x, z) {
 
   return THREE.MathUtils.clamp(
     (grade + ridge * ridgeScale + shoulderCrown) * startBlend + courseFeatures + roadRipple,
-    -2.3,
-    activeCourse.visualProfile === "spaArdennes" ? 8.4 : 5.8,
+    activeCourse.elevationBounds?.min ?? -2.3,
+    activeCourse.elevationBounds?.max ?? (activeCourse.visualProfile === "spaArdennes" ? 8.4 : 5.8),
   );
 }
 
@@ -810,8 +810,8 @@ function createTerrainBody() {
 
   const heightfield = new CANNON.Heightfield(data, {
     elementSize,
-    minValue: -4,
-    maxValue: 8,
+    minValue: activeCourse.elevationBounds?.min ?? -4,
+    maxValue: activeCourse.elevationBounds?.max ?? 8,
   });
   const terrainBody = new CANNON.Body({ mass: 0, material: groundMaterial });
   terrainBody.addShape(heightfield);
@@ -2566,6 +2566,8 @@ function interpolateProgress(start, end, t) {
 }
 
 function createDrainageDitches() {
+  if (activeCourse.disableDrainageDitches) return;
+
   const ditchMaterial = new THREE.MeshStandardMaterial({
     color: 0x34382f,
     roughness: 0.96,
