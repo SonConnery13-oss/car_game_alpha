@@ -162,44 +162,61 @@
           </div>
 
           <div class="course-picker map-picker" aria-label="Course selector">
-            <span>Course</span>
-            <div class="course-grid">
-              <button class="course-option is-selected" type="button" data-course-id="map1">
-                <strong>Akina Ridge</strong>
-                <small>7.5 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="map2">
-                <strong>Iroha Switchbacks</strong>
-                <small>5.1 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="map3">
-                <strong>Happo Forest</strong>
-                <small>5.5 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="akagi">
-                <strong>Akagi Pass</strong>
-                <small>5.8 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="sadamine">
-                <strong>Sadamine Pass</strong>
-                <small>6.8 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="tsukuba">
-                <strong>Tsukuba Fruits Line</strong>
-                <small>6.8 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="monaco">
-                <strong>Monaco GP Street Circuit</strong>
-                <small>3.3 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="spa">
-                <strong>Spa Ardennes Circuit</strong>
-                <small>7.0 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="suspension">
-                <strong>Suspension Testing Ground</strong>
-                <small>Free drive</small>
-              </button>
+            <span>Track Category</span>
+            <div class="course-groups">
+              <section class="course-group" aria-labelledby="tougeTracksHeading">
+                <h3 id="tougeTracksHeading">Touge Tracks</h3>
+                <div class="course-grid">
+                  <button class="course-option is-selected" type="button" data-course-id="map1">
+                    <strong>Akina Ridge</strong>
+                    <small>7.5 km</small>
+                  </button>
+                  <button class="course-option" type="button" data-course-id="map2">
+                    <strong>Iroha Switchbacks</strong>
+                    <small>5.1 km</small>
+                  </button>
+                  <button class="course-option" type="button" data-course-id="map3">
+                    <strong>Happo Forest</strong>
+                    <small>5.5 km</small>
+                  </button>
+                  <button class="course-option" type="button" data-course-id="akagi">
+                    <strong>Akagi Pass</strong>
+                    <small>5.8 km</small>
+                  </button>
+                  <button class="course-option" type="button" data-course-id="sadamine">
+                    <strong>Sadamine Pass</strong>
+                    <small>6.8 km</small>
+                  </button>
+                  <button class="course-option" type="button" data-course-id="tsukuba">
+                    <strong>Tsukuba Fruits Line</strong>
+                    <small>6.8 km</small>
+                  </button>
+                </div>
+              </section>
+
+              <section class="course-group" aria-labelledby="f1TracksHeading">
+                <h3 id="f1TracksHeading">F1 Tracks</h3>
+                <div class="course-grid">
+                  <button class="course-option" type="button" data-course-id="monaco">
+                    <strong>Monaco GP Street Circuit</strong>
+                    <small>3.3 km</small>
+                  </button>
+                  <button class="course-option" type="button" data-course-id="spa">
+                    <strong>Spa Ardennes Circuit</strong>
+                    <small>7.0 km</small>
+                  </button>
+                </div>
+              </section>
+
+              <section class="course-group" aria-labelledby="etcTracksHeading">
+                <h3 id="etcTracksHeading">ETC</h3>
+                <div class="course-grid">
+                  <button class="course-option" type="button" data-course-id="suspension">
+                    <strong>Suspension Testing Ground</strong>
+                    <small>Free drive</small>
+                  </button>
+                </div>
+              </section>
             </div>
           </div>
         </div>
