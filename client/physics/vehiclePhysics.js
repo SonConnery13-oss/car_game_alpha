@@ -829,7 +829,8 @@ export class VehiclePhysics {
 
   updateSuspension(dt) {
     for (const wheel of this.wheels) {
-      wheel.previousCompressionDistance = wheel.compressionDistance;
+      const wasInContact = wheel.isInContact;
+      wheel.previousCompressionDistance = wasInContact ? wheel.compressionDistance : 0;
       this.raycastWheel(wheel);
 
       if (!wheel.isInContact) {
@@ -849,13 +850,21 @@ export class VehiclePhysics {
       // rebound removes support so the body can pop back instead of floating.
       wheel.compressionDistance = Math.max(0, wheel.suspensionRestLength - wheel.suspensionLength);
       wheel.compression = clamp(wheel.compressionDistance / Math.max(wheel.suspensionTravel, EPSILON), 0, 1);
-      wheel.suspensionVelocity = (wheel.compressionDistance - wheel.previousCompressionDistance) / dt;
+      const justLanded = !wasInContact;
+      const rawCompressionDelta = wheel.compressionDistance - wheel.previousCompressionDistance;
+      const landingCompressionDelta = justLanded
+        ? Math.min(rawCompressionDelta, (this.config.landingCompressionVelocity ?? 2.2) * dt)
+        : rawCompressionDelta;
+      wheel.suspensionVelocity = landingCompressionDelta / dt;
 
       const springForce = wheel.compressionDistance * this.config.springStiffness;
-      const dampingForce = wheel.suspensionVelocity * this.config.damperStiffness;
+      const dampingScale = justLanded ? this.config.landingDampingScale ?? 0.42 : 1;
+      const dampingForce = wheel.suspensionVelocity * this.config.damperStiffness * dampingScale;
       const bumpStopCompression = Math.max(0, wheel.compressionDistance - wheel.suspensionTravel * 0.82);
-      const bumpStopForce = bumpStopCompression * bumpStopCompression * this.config.bumpStopStiffness;
-      const maxForce = this.config.mass * this.gravity * 3.8;
+      const bumpStopScale = justLanded ? this.config.landingBumpStopScale ?? 0.48 : 1;
+      const bumpStopForce = bumpStopCompression * bumpStopCompression * this.config.bumpStopStiffness * bumpStopScale;
+      const forceLimit = justLanded ? this.config.landingSuspensionForceLimit ?? 2.65 : 3.8;
+      const maxForce = this.config.mass * this.gravity * forceLimit;
       const suspensionForce = clamp(springForce + dampingForce + bumpStopForce, 0, maxForce);
 
       wheel.suspensionForce = suspensionForce;

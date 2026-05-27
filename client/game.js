@@ -330,6 +330,7 @@ const boostSpeedStreaks = [];
 const vehicleCollisionDebris = [];
 const WALL_SPARK_GEOMETRY = new THREE.SphereGeometry(0.035, 6, 4);
 const WALL_SPARK_COLORS = [0xfff1a6, 0xffc247, 0xff742f];
+const LANDING_SPARK_COLORS = [0xfff6bd, 0xffd35c, 0xff8a34, 0xffffff];
 const TIRE_MARK_GEOMETRY = new THREE.BoxGeometry(0.34, 0.012, 1.08);
 const BRAKE_TRAIL_GEOMETRY = new THREE.BoxGeometry(0.13, 0.04, 1);
 const BOOST_STREAK_GEOMETRY = new THREE.BoxGeometry(0.045, 0.045, 2.7);
@@ -347,6 +348,7 @@ const VEHICLE_DEBRIS_LIFE_SECONDS = 5;
 const MULTIPLAYER_SEND_INTERVAL = 1000 / 20;
 const REMOTE_INTERPOLATION_MS = 140;
 let lastWallSparkAt = 0;
+let lastLandingSparkAt = 0;
 let tireMarkAccumulator = 0;
 let brakeTrailAccumulator = 0;
 let boostStreakAccumulator = 0;
@@ -367,6 +369,8 @@ const vehicleDynamics = {
   preStepVelocityY: 0,
   airborneTime: 0,
   airborneFallSpeed: 0,
+  landingStabilizeTime: 0,
+  landingImpact: 0,
   lastGroundSlope: 0,
   lastSideSlope: 0,
   lastGroundedSpeed: 0,
@@ -526,7 +530,7 @@ function getTrackElevation(x, z) {
   const courseFeatures = getCourseFeatureElevation(x, z);
   const roadRipple = getSurfaceRipple(x, z) * startBlend;
 
-  return THREE.MathUtils.clamp(
+  return softClampElevation(
     (rollingGrade + northCrest + southDip + longRise + westDrop + eastCrest) * startBlend +
       jumpRamp +
       testArea +
@@ -558,7 +562,7 @@ function getMountainTrackElevation(x, z) {
   const roadRipple = getSurfaceRipple(x, z) * 1.35 * startBlend;
   const ridgeScale = activeCourse.ridgeScale ?? 1;
 
-  return THREE.MathUtils.clamp(
+  return softClampElevation(
     (grade + ridge * ridgeScale + shoulderCrown) * startBlend + courseFeatures + roadRipple,
     activeCourse.elevationBounds?.min ?? -2.3,
     activeCourse.elevationBounds?.max ?? (activeCourse.visualProfile === "spaArdennes" ? 8.4 : 5.8),
@@ -569,16 +573,40 @@ function getCourseFeatureElevation(x, z) {
   let elevation = 0;
   const radiusScale = activeCourse.elevationFeatureRadiusScale ??
     (activeCourse.visualProfile === "spaArdennes" ? 1.36 : activeCourse.visualProfile === "monacoStreet" ? 1.28 : 1.16);
+  const falloffPower = activeCourse.elevationFeatureFalloffPower ??
+    (activeCourse.visualProfile === "spaArdennes" ? 0.72 : activeCourse.visualProfile === "monacoStreet" ? 0.76 : 0.84);
 
   for (const feature of activeCourse.elevationFeatures ?? []) {
     const radiusX = Math.max(feature.radiusX ?? feature.radius ?? 1, 1) * radiusScale;
     const radiusZ = Math.max(feature.radiusZ ?? feature.radius ?? 1, 1) * radiusScale;
     const dx = (x - feature.x) / radiusX;
     const dz = (z - feature.z) / radiusZ;
-    elevation += feature.height * Math.exp(-(dx * dx + dz * dz));
+    elevation += feature.height * Math.exp(-Math.pow(dx * dx + dz * dz, falloffPower));
   }
 
   return elevation;
+}
+
+function softClampElevation(value, min, max) {
+  const softness = activeCourse.elevationClampSoftness ??
+    (activeCourse.visualProfile === "spaArdennes" ? 2.4 : activeCourse.visualProfile === "monacoStreet" ? 1.8 : 1.35);
+  if (!Number.isFinite(softness) || softness <= 0) {
+    return THREE.MathUtils.clamp(value, min, max);
+  }
+
+  let result = value;
+  const upperStart = max - softness;
+  const lowerStart = min + softness;
+
+  if (result > upperStart) {
+    result = upperStart + softness * (1 - Math.exp(-(result - upperStart) / softness));
+  }
+
+  if (result < lowerStart) {
+    result = lowerStart - softness * (1 - Math.exp(-(lowerStart - result) / softness));
+  }
+
+  return THREE.MathUtils.clamp(result, min, max);
 }
 
 function getElevationWaveFrequencyScale() {
@@ -6987,6 +7015,17 @@ function syncVehicleDynamicsFromPhysics(delta) {
 
   const grounded = vehicle.grounded;
   const signedSpeed = vehicle.signedSpeed;
+  const wasGrounded = vehicleDynamics.grounded;
+  const airborneTime = vehicleDynamics.airborneTime;
+  const landingFallSpeed = Math.max(
+    vehicleDynamics.airborneFallSpeed,
+    -chassisBody.velocity.y,
+    -vehicleDynamics.preStepVelocityY,
+  );
+
+  if (grounded && !wasGrounded && airborneTime > 0.12) {
+    handleVehicleLanding(airborneTime, landingFallSpeed);
+  }
 
   steering = vehicle.steeringAngle;
   driveInput = vehicle.driveInput;
@@ -7011,7 +7050,7 @@ function syncVehicleDynamicsFromPhysics(delta) {
   vehicleDynamics.frontGrip = vehicle.frontGrip ?? 1;
   vehicleDynamics.airborneTime = grounded ? 0 : vehicleDynamics.airborneTime + delta;
   vehicleDynamics.airborneFallSpeed = grounded
-    ? vehicleDynamics.airborneFallSpeed
+    ? 0
     : Math.max(vehicleDynamics.airborneFallSpeed, -chassisBody.velocity.y);
   vehicleDynamics.lastGroundedSpeed = grounded ? signedSpeed : vehicleDynamics.lastGroundedSpeed;
   vehicleDynamics.lastSteering = steering;
@@ -7021,6 +7060,75 @@ function syncVehicleDynamicsFromPhysics(delta) {
   tunedDamperState.heave = chassisBody.velocity.y;
   tunedDamperState.pitch = chassisBody.angularVelocity.x;
   tunedDamperState.roll = chassisBody.angularVelocity.z;
+}
+
+function handleVehicleLanding(airborneTime, fallSpeed) {
+  const impact = Math.max(0, fallSpeed);
+  if (impact < 3.6) return;
+
+  const groundNormal = getLandingGroundNormal();
+  const normalVelocity = chassisBody.velocity.dot(groundNormal);
+  const targetNormalVelocity = -THREE.MathUtils.clamp(impact * 0.18, 1.2, 3.0);
+
+  if (normalVelocity < targetNormalVelocity) {
+    const correction = targetNormalVelocity - normalVelocity;
+    chassisBody.velocity.x += groundNormal.x * correction;
+    chassisBody.velocity.y += groundNormal.y * correction;
+    chassisBody.velocity.z += groundNormal.z * correction;
+  }
+
+  if (chassisBody.velocity.y < -3.4) {
+    chassisBody.velocity.y = -3.4;
+  }
+
+  const impactBlend = THREE.MathUtils.clamp((impact - 3.6) / 12, 0, 1);
+  const angularDamping = THREE.MathUtils.lerp(0.56, 0.24, impactBlend);
+  chassisBody.angularVelocity.x *= angularDamping;
+  chassisBody.angularVelocity.y *= THREE.MathUtils.lerp(0.82, 0.62, impactBlend);
+  chassisBody.angularVelocity.z *= angularDamping;
+  chassisBody.wakeUp();
+
+  vehicleDynamics.landingStabilizeTime = Math.max(
+    vehicleDynamics.landingStabilizeTime,
+    THREE.MathUtils.lerp(0.18, 0.38, impactBlend),
+  );
+  vehicleDynamics.landingImpact = Math.max(vehicleDynamics.landingImpact, impact);
+
+  const now = performance.now();
+  if (impact > 4.4 && now - lastLandingSparkAt > 90) {
+    emitLandingSparks(impact, airborneTime, groundNormal);
+    lastLandingSparkAt = now;
+  }
+}
+
+function getLandingGroundNormal() {
+  const normal = vehicle.averageGroundNormal ?? null;
+  if (normal && normal.lengthSquared() > 0.001) {
+    return normal.clone().normalize();
+  }
+
+  return getTerrainNormal(chassisBody.position.x, chassisBody.position.z);
+}
+
+function stabilizeRecentLanding(delta) {
+  if (vehicleDynamics.landingStabilizeTime <= 0) return;
+
+  const impactBlend = THREE.MathUtils.clamp((vehicleDynamics.landingImpact - 3.6) / 12, 0, 1);
+  const maxReboundVelocity = THREE.MathUtils.lerp(2.4, 0.95, impactBlend);
+
+  if (chassisBody.velocity.y > maxReboundVelocity) {
+    chassisBody.velocity.y = maxReboundVelocity;
+  }
+
+  const angularDamping = Math.exp(-THREE.MathUtils.lerp(7, 16, impactBlend) * delta);
+  chassisBody.angularVelocity.x *= angularDamping;
+  chassisBody.angularVelocity.y *= Math.exp(-THREE.MathUtils.lerp(2.4, 5.4, impactBlend) * delta);
+  chassisBody.angularVelocity.z *= angularDamping;
+  vehicleDynamics.landingStabilizeTime = Math.max(0, vehicleDynamics.landingStabilizeTime - delta);
+
+  if (vehicleDynamics.landingStabilizeTime <= 0) {
+    vehicleDynamics.landingImpact = 0;
+  }
 }
 
 function isVehicleGrounded() {
@@ -7788,6 +7896,59 @@ function emitWallSparks(point, normal, tangentSpeed, impact) {
     wallSparkParticles.push(spark);
     scene.add(spark);
   }
+}
+
+function emitLandingSparks(impact, airborneTime, groundNormal) {
+  const normalVector = new THREE.Vector3(groundNormal.x, groundNormal.y, groundNormal.z).normalize();
+  const forward = getHorizontalVehicleForward();
+  const right = getHorizontalVehicleRight();
+  const wheels = vehicle.wheels.filter((wheel) => wheel.isInContact && wheel.contactPointWorld);
+  const points = wheels.length
+    ? wheels.map((wheel) => new THREE.Vector3(
+      wheel.contactPointWorld.x,
+      wheel.contactPointWorld.y,
+      wheel.contactPointWorld.z,
+    ))
+    : [new THREE.Vector3(chassisBody.position.x, getTrackElevation(chassisBody.position.x, chassisBody.position.z), chassisBody.position.z)];
+  const sparksPerPoint = THREE.MathUtils.clamp(
+    Math.floor(impact * 0.48 + airborneTime * 7),
+    3,
+    9,
+  );
+
+  for (const point of points) {
+    for (let i = 0; i < sparksPerPoint; i += 1) {
+      const color = LANDING_SPARK_COLORS[Math.floor(Math.random() * LANDING_SPARK_COLORS.length)];
+      const spark = new THREE.Mesh(
+        WALL_SPARK_GEOMETRY,
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.95,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      const sideSpread = (Math.random() - 0.5) * 1.4;
+      const rearSpray = -(0.4 + Math.random() * 1.6);
+      spark.position.copy(point);
+      spark.position.addScaledVector(normalVector, 0.09 + Math.random() * 0.12);
+      spark.position.addScaledVector(right, sideSpread * 0.18);
+      spark.scale.setScalar(0.9 + Math.random() * 1.9);
+      spark.userData.life = 0.2 + Math.random() * 0.18;
+      spark.userData.maxLife = spark.userData.life;
+      spark.userData.velocity = forward
+        .clone()
+        .multiplyScalar(rearSpray * THREE.MathUtils.clamp(impact, 4, 18) * 0.18)
+        .addScaledVector(right, sideSpread * (1.2 + Math.random() * 2.8))
+        .addScaledVector(normalVector, 1.2 + Math.random() * 2.2);
+      spark.userData.velocity.y += 0.2 + Math.random() * 0.9;
+      wallSparkParticles.push(spark);
+      scene.add(spark);
+    }
+  }
+
+  trimEffectArray(wallSparkParticles, 260);
 }
 
 function updateWallSparks(delta) {
@@ -8693,6 +8854,8 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   vehicleDynamics.preStepVelocityY = 0;
   vehicleDynamics.airborneTime = 0;
   vehicleDynamics.airborneFallSpeed = 0;
+  vehicleDynamics.landingStabilizeTime = 0;
+  vehicleDynamics.landingImpact = 0;
   vehicleDynamics.lastGroundSlope = 0;
   vehicleDynamics.lastSideSlope = 0;
   vehicleDynamics.lastGroundedSpeed = 0;
@@ -8734,6 +8897,7 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   }
   clearVehicleCollisionDebris();
   lastWallSparkAt = 0;
+  lastLandingSparkAt = 0;
   tireMarkAccumulator = 0;
   resetBrakeTrailAnchors();
   boostStreakAccumulator = 0;
@@ -8809,6 +8973,7 @@ function animate() {
         updateControls(FIXED_TIME_STEP);
         vehicleDynamics.preStepVelocityY = chassisBody.velocity.y;
         world.step(FIXED_TIME_STEP);
+        stabilizeRecentLanding(FIXED_TIME_STEP);
         physicsAccumulator -= FIXED_TIME_STEP;
         physicsSteps += 1;
       }
