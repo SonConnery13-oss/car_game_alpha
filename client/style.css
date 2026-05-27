@@ -700,6 +700,35 @@ button {
   margin-top: 22px;
 }
 
+.garage-groups {
+  display: grid;
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.garage-group {
+  display: grid;
+  gap: 12px;
+}
+
+.garage-group + .garage-group {
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.garage-group h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 0.84rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.garage-group .garage-grid {
+  margin-top: 0;
+}
+
 .garage-option {
   display: grid;
   gap: 12px;

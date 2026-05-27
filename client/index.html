@@ -122,31 +122,48 @@
             <p class="menu-kicker">GARAGE</p>
             <button class="menu-button" data-menu-back type="button">Back</button>
           </div>
-          <div class="garage-grid">
-            <button class="garage-option is-selected" type="button" data-car-id="gt3">
-              <span class="garage-preview garage-preview-gt3"></span>
-              <strong>GT3 RS Prototype</strong>
-            </button>
-            <button class="garage-option" type="button" data-car-id="amg">
-              <span class="garage-preview garage-preview-amg"></span>
-              <strong>AMG GT Track</strong>
-            </button>
-            <button class="garage-option" type="button" data-car-id="ae86">
-              <span class="garage-preview garage-preview-ae86"></span>
-              <strong>AE86 H2 Trueno</strong>
-            </button>
-            <button class="garage-option" type="button" data-car-id="rx7fd">
-              <span class="garage-preview garage-preview-rx7fd"></span>
-              <strong>RX-7 FD Spirit</strong>
-            </button>
-            <button class="garage-option" type="button" data-car-id="rx7fc">
-              <span class="garage-preview garage-preview-rx7fc"></span>
-              <strong>RX-7 FC Turbo</strong>
-            </button>
-            <button class="garage-option" type="button" data-car-id="formulaRb22">
-              <span class="garage-preview garage-preview-formula"></span>
-              <strong>Formula RB22</strong>
-            </button>
+          <div class="garage-groups" aria-label="Car categories">
+            <section class="garage-group" aria-labelledby="gt3CarsHeading">
+              <h3 id="gt3CarsHeading">GT3</h3>
+              <div class="garage-grid">
+                <button class="garage-option is-selected" type="button" data-car-id="gt3">
+                  <span class="garage-preview garage-preview-gt3"></span>
+                  <strong>GT3 RS Prototype</strong>
+                </button>
+                <button class="garage-option" type="button" data-car-id="amg">
+                  <span class="garage-preview garage-preview-amg"></span>
+                  <strong>AMG GT Track</strong>
+                </button>
+              </div>
+            </section>
+
+            <section class="garage-group" aria-labelledby="tougeCarsHeading">
+              <h3 id="tougeCarsHeading">Touge</h3>
+              <div class="garage-grid">
+                <button class="garage-option" type="button" data-car-id="ae86">
+                  <span class="garage-preview garage-preview-ae86"></span>
+                  <strong>AE86 H2 Trueno</strong>
+                </button>
+                <button class="garage-option" type="button" data-car-id="rx7fd">
+                  <span class="garage-preview garage-preview-rx7fd"></span>
+                  <strong>RX-7 FD Spirit</strong>
+                </button>
+                <button class="garage-option" type="button" data-car-id="rx7fc">
+                  <span class="garage-preview garage-preview-rx7fc"></span>
+                  <strong>RX-7 FC Turbo</strong>
+                </button>
+              </div>
+            </section>
+
+            <section class="garage-group" aria-labelledby="f1CarsHeading">
+              <h3 id="f1CarsHeading">F1</h3>
+              <div class="garage-grid">
+                <button class="garage-option" type="button" data-car-id="formulaRb22">
+                  <span class="garage-preview garage-preview-formula"></span>
+                  <strong>Formula RB22</strong>
+                </button>
+              </div>
+            </section>
           </div>
         </div>
       </section>
