@@ -2304,7 +2304,7 @@ function createCourseAdBoards() {
     });
     const postMaterial = new THREE.MeshStandardMaterial({ color: 0x646a68, roughness: 0.48, metalness: 0.38 });
     const groundY = getTrackElevation(base.x, base.y);
-    const yaw = Math.atan2((-normal.x * side), (-normal.y * side));
+    const yaw = Math.atan2((-normal.x * side), (-normal.y * side)) + (activeCourse.adBoardYawOffset ?? 0);
 
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 1.38), boardMaterial);
     panel.position.set(base.x, groundY + 2.2, base.y);
@@ -2339,7 +2339,7 @@ function createCourseGantries() {
     const postOffset = ROAD_WIDTH / 2 + (gantry.postOffset ?? 2.8);
     const span = postOffset * 2;
     const acrossYaw = Math.atan2(-normal.y, normal.x);
-    const boardYaw = Math.atan2(tangent.x, tangent.y) + Math.PI / 2;
+    const boardYaw = Math.atan2(tangent.x, tangent.y) + Math.PI / 2 + (activeCourse.gantrySignYawOffset ?? 0);
     const group = new THREE.Group();
     const postGeometry = new THREE.BoxGeometry(0.38, height, 0.38);
     const beamGeometry = new THREE.BoxGeometry(span + 1.2, 0.42, 0.48);
@@ -2857,7 +2857,7 @@ function createRoadsideSigns() {
     if (!isRoadsideObjectClear(base.x, base.y, 1.2, 0.8)) continue;
 
     const baseY = getTrackElevation(base.x, base.y);
-    const yaw = Math.atan2(normal.x * side, normal.y * side);
+    const yaw = Math.atan2(normal.x * side, normal.y * side) + (activeCourse.roadsideSignYawOffset ?? 0);
 
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.1, 0.12), postMaterial);
     post.position.set(base.x, baseY + 1.05, base.y);
@@ -2876,7 +2876,7 @@ function createRoadsideSigns() {
       baseY + 2.18,
       base.y + normal.y * side * 0.045,
     );
-    arrow.rotation.y = Math.atan2(tangent.x, tangent.y);
+    arrow.rotation.y = Math.atan2(tangent.x, tangent.y) + (activeCourse.roadsideSignYawOffset ?? 0);
     arrow.renderOrder = 10;
     scene.add(arrow);
   }
@@ -6906,9 +6906,15 @@ function updateControls(delta) {
   updateDriftBoost(delta, drivingInput);
   handleMultiplayerVehicleCollisions();
 
-  if (chassisBody.position.y < -5) {
+  if (chassisBody.position.y < getFallResetY()) {
     resetCar();
   }
+}
+
+function getFallResetY() {
+  if (Number.isFinite(activeCourse.fallResetY)) return activeCourse.fallResetY;
+  const minElevation = activeCourse.elevationBounds?.min ?? -4;
+  return minElevation - 6;
 }
 
 function prepareBoostInput(input) {
