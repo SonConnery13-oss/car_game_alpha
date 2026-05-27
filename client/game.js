@@ -228,8 +228,12 @@ const START_GRID_WIDTH = activeCourse.startGridWidth ?? ROAD_WIDTH;
 const RACE_GRID_SPACING = 4.8;
 const RACE_GRID_ROW_SPACING = 5.8;
 const trackPoints = createTrackPoints(activeCourse);
-const START_INDEX = activeCourse.startIndex ?? 0;
-const FINISH_INDEX = activeCourse.finishIndex ?? (activeCourse.loop ? START_INDEX : trackPoints.length - 1);
+const START_INDEX = resolveCourseIndex(activeCourse.startIndex, activeCourse.startFraction, 0);
+const FINISH_INDEX = resolveCourseIndex(
+  activeCourse.finishIndex,
+  activeCourse.finishFraction,
+  activeCourse.loop ? START_INDEX : trackPoints.length - 1,
+);
 const START_GATE = createCourseGate(START_INDEX);
 const FINISH_GATE = createCourseGate(FINISH_INDEX);
 const START_SPAWN_POINT = START_GATE.center.clone().addScaledVector(
@@ -530,7 +534,7 @@ function getTrackElevation(x, z) {
   const courseFeatures = getCourseFeatureElevation(x, z);
   const roadRipple = getSurfaceRipple(x, z) * startBlend;
 
-  return softClampElevation(
+  return applyStartFlattening(softClampElevation(
     (rollingGrade + northCrest + southDip + longRise + westDrop + eastCrest) * startBlend +
       jumpRamp +
       testArea +
@@ -538,7 +542,7 @@ function getTrackElevation(x, z) {
       roadRipple,
     activeCourse.elevationBounds?.min ?? -0.85,
     activeCourse.elevationBounds?.max ?? (activeCourse.visualProfile === "monacoStreet" ? 3.1 : 2.4),
-  );
+  ), x, z);
 }
 
 function getMountainTrackElevation(x, z) {
@@ -562,11 +566,11 @@ function getMountainTrackElevation(x, z) {
   const roadRipple = getSurfaceRipple(x, z) * 1.35 * startBlend;
   const ridgeScale = activeCourse.ridgeScale ?? 1;
 
-  return softClampElevation(
+  return applyStartFlattening(softClampElevation(
     (grade + ridge * ridgeScale + shoulderCrown) * startBlend + courseFeatures + roadRipple,
     activeCourse.elevationBounds?.min ?? -2.3,
     activeCourse.elevationBounds?.max ?? (activeCourse.visualProfile === "spaArdennes" ? 8.4 : 5.8),
-  );
+  ), x, z);
 }
 
 function getCourseFeatureElevation(x, z) {
@@ -607,6 +611,16 @@ function softClampElevation(value, min, max) {
   }
 
   return THREE.MathUtils.clamp(result, min, max);
+}
+
+function applyStartFlattening(elevation, x, z) {
+  const radius = activeCourse.startFlatRadius ?? 34;
+  if (!Number.isFinite(radius) || radius <= 0) return elevation;
+
+  const transition = activeCourse.startFlatTransition ?? 46;
+  const distance = Math.hypot(x - START_X, z - START_Z);
+  const trackBlend = smootherstep(radius, radius + transition, distance);
+  return THREE.MathUtils.lerp(activeCourse.startFlatElevation ?? 0, elevation, trackBlend);
 }
 
 function getElevationWaveFrequencyScale() {
@@ -4611,6 +4625,19 @@ function createTrackPoints(course = activeCourse) {
   }
 
   return points;
+}
+
+function resolveCourseIndex(index, fraction, fallback) {
+  if (Number.isFinite(index)) {
+    return normalizeTrackIndex(Math.round(index));
+  }
+
+  if (Number.isFinite(fraction)) {
+    const maxIndex = Math.max(trackPoints.length - 1, 0);
+    return normalizeTrackIndex(Math.round(THREE.MathUtils.clamp(fraction, 0, 1) * maxIndex));
+  }
+
+  return normalizeTrackIndex(fallback);
 }
 
 function roundCourseControlPoints(controlPoints, course) {

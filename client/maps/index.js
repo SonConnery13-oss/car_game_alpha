@@ -6,6 +6,7 @@ import { MAP_SADAMINE } from "./MapSadamine.js";
 import { MAP_TSUKUBA } from "./MapTsukuba.js";
 import { MAP_MONACO } from "./MapMonaco.js";
 import { MAP_SPA } from "./MapSpa.js";
+import { MAP_SUSPENSION } from "./MapSuspension.js";
 
 export const COURSE_DEFS = {
   [MAP_1.id]: MAP_1,
@@ -16,6 +17,7 @@ export const COURSE_DEFS = {
   [MAP_TSUKUBA.id]: MAP_TSUKUBA,
   [MAP_MONACO.id]: MAP_MONACO,
   [MAP_SPA.id]: MAP_SPA,
+  [MAP_SUSPENSION.id]: MAP_SUSPENSION,
 };
 
 export const DEFAULT_COURSE_ID = MAP_1.id;
