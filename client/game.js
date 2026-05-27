@@ -76,6 +76,7 @@ const STORAGE_KEYS = {
   room: "racing.room.v1",
 };
 const DEFAULT_ROAD_WIDTH = 14;
+const DEFAULT_LOOP_LAPS = 3;
 const FIXED_TIME_STEP = 1 / 120;
 const TERRAIN_SIZE = 1120;
 const SKY_DOME_RADIUS = 900;
@@ -456,6 +457,7 @@ const tunedDamperState = {
 let previousStartGateSide = getGateSide(START_GATE, new THREE.Vector2(START_POSITION.x, START_POSITION.z));
 let previousFinishGateSide = getGateSide(FINISH_GATE, new THREE.Vector2(START_POSITION.x, START_POSITION.z));
 let lap = 0;
+let raceStartedAt = performance.now();
 let lapStartedAt = performance.now();
 let bestLap = null;
 let lastLapStamp = 0;
@@ -975,12 +977,15 @@ function createTrack() {
 
 function createRoadShoulders() {
   const shoulderWidth = activeCourse.shoulderWidth ?? 4.5;
-  const shoulderTexture = makeRoadShoulderTexture(activeCourse.shoulder);
+  const shoulderTexture = activeCourse.asphaltShoulders
+    ? makeAsphaltTexture(activeCourse.asphalt)
+    : makeRoadShoulderTexture(activeCourse.shoulder);
   shoulderTexture.repeat.set(1, 24);
   const shoulderMaterial = new THREE.MeshStandardMaterial({
     map: shoulderTexture,
-    color: 0x897b5c,
-    roughness: 0.96,
+    color: activeCourse.asphaltShoulders ? activeCourse.asphalt?.color ?? 0x101316 : 0x897b5c,
+    roughness: activeCourse.asphaltShoulders ? 0.88 : 0.96,
+    metalness: activeCourse.asphaltShoulders ? 0.02 : 0,
     polygonOffset: true,
     polygonOffsetFactor: -0.9,
     polygonOffsetUnits: -0.9,
@@ -2085,8 +2090,8 @@ function createCircuitRunoffZones() {
     polygonOffsetUnits: -0.8,
   });
   const asphaltMaterial = new THREE.MeshStandardMaterial({
-    map: makeAsphaltTexture({ base: "#171a1d", repeat: 20 }),
-    color: 0x16191c,
+    map: makeAsphaltTexture(activeCourse.asphalt ?? { base: "#171a1d", repeat: 20 }),
+    color: activeCourse.asphalt?.color ?? 0x16191c,
     roughness: 0.88,
     metalness: 0.02,
     polygonOffset: true,
@@ -2114,11 +2119,20 @@ function createCircuitRunoffZones() {
   };
 
   for (const zone of activeCourse.runoffZones ?? []) {
-    if (zone.striped) {
-      createStripedRunoffZone(zone, materialByName);
+    const normalizedZone = activeCourse.asphaltRunoffs
+      ? { ...zone, material: "asphalt", striped: false, grip: 1 }
+      : zone;
+
+    if (normalizedZone.striped) {
+      createStripedRunoffZone(normalizedZone, materialByName);
     } else {
-      const material = materialByName[zone.material] ?? gravelMaterial;
-      const runoff = createTracksideSurfaceRibbon(zone, material, TRACK_SURFACE_OFFSET + 0.032, zone.crossSegments ?? 5);
+      const material = materialByName[normalizedZone.material] ?? gravelMaterial;
+      const runoff = createTracksideSurfaceRibbon(
+        normalizedZone,
+        material,
+        TRACK_SURFACE_OFFSET + 0.032,
+        normalizedZone.crossSegments ?? 5,
+      );
       if (!runoff) continue;
       runoff.receiveShadow = true;
       runoff.renderOrder = 1;
@@ -5060,6 +5074,7 @@ function getSurfaceGripAt(x, z) {
   const runoff = getRunoffZoneAt(progress, distance);
 
   if (distance <= asphaltEdge) return 1;
+  if (activeCourse.asphaltRunoffs && runoff) return 1;
   if (Number.isFinite(runoff?.grip)) return runoff.grip;
   if (runoff?.material === "asphalt" || runoff?.material === "concrete") return 0.88;
   if (String(runoff?.material ?? "").startsWith("painted")) return 0.82;
@@ -5067,6 +5082,7 @@ function getSurfaceGripAt(x, z) {
   if (runoff?.material === "grass") return 0.6;
 
   if (distance <= shoulderEdge) {
+    if (activeCourse.asphaltShoulders) return 1;
     const t = (distance - asphaltEdge) / Math.max(shoulderEdge - asphaltEdge, 0.001);
     return THREE.MathUtils.lerp(0.9, 0.68, t);
   }
@@ -5716,6 +5732,7 @@ function requestRaceStart() {
 function startLocalRace() {
   setupRaceScreen();
   resetRaceSession();
+  resetRaceProgress();
   resetCar(0, 1);
   startPreRaceSequence();
 }
@@ -5745,6 +5762,15 @@ function resetRaceSession() {
   raceSession.gridTotal = 1;
   raceSession.participants = [];
   raceSession.results = [];
+}
+
+function resetRaceProgress() {
+  const now = performance.now();
+  lap = 0;
+  raceStartedAt = now;
+  lapStartedAt = now;
+  bestLap = null;
+  lastLapStamp = 0;
 }
 
 function isActiveRaceSession() {
@@ -5779,6 +5805,7 @@ function handleRaceCountdown(payload = {}) {
   raceSession.results = [];
 
   setupRaceScreen();
+  resetRaceProgress();
   resetCar(raceSession.gridSlot, raceSession.gridTotal);
   startPreRaceSequence({ startAt: raceSession.startAt, raceId: raceSession.id });
 }
@@ -6441,7 +6468,8 @@ async function startPreRaceSequence({ startAt = null } = {}) {
   }
   paused = false;
   pauseStartedAt = null;
-  lapStartedAt = performance.now();
+  raceStartedAt = performance.now();
+  lapStartedAt = raceStartedAt;
   if (raceSession.id) raceSession.status = "racing";
   syncPauseButton();
   readyTimeout = window.setTimeout(() => message.classList.remove("is-visible"), 700);
@@ -6520,7 +6548,7 @@ function updateSelectedCourseUi() {
   if (selectedCourseName) {
     selectedCourseName.textContent = `${selected.menuLabel ?? selected.name} / ${selected.distanceLabel}`;
   }
-  if (lapLabel) lapLabel.textContent = selected.loop ? "LAP" : "RUN";
+  if (lapLabel) lapLabel.textContent = selected.loop ? "LAPS" : "RUN";
 
   for (const option of courseOptions) {
     const course = COURSE_DEFS[option.dataset.courseId];
@@ -8314,8 +8342,12 @@ function updateLap() {
       if (activeCourse.loop) {
         lap += 1;
         bestLap = bestLap === null ? lapTime : Math.min(bestLap, lapTime);
-        lapStartedAt = now;
-        flashMessage(`LAP ${lap}`);
+        if (lap >= getRaceLapTotal()) {
+          finishRace(now - raceStartedAt);
+        } else {
+          lapStartedAt = now;
+          flashMessage(`LAP ${lap}`);
+        }
       } else {
         finishRace(lapTime);
       }
@@ -8355,6 +8387,11 @@ function finishRace(finishTime) {
   rememberRaceResult(createLocalRaceResult(finishTime));
   submitRaceFinish(finishTime);
   showResultsOverlay(finishTime, savedRecord);
+}
+
+function getRaceLapTotal() {
+  if (!activeCourse.loop) return 1;
+  return Math.max(1, activeCourse.totalLaps ?? DEFAULT_LOOP_LAPS);
 }
 
 function saveLeaderboardRecord(finishTime) {
@@ -8469,7 +8506,7 @@ function updateHud() {
   const kmh = Math.round(chassisBody.velocity.length() * 3.6);
   const elapsed = performance.now() - lapStartedAt;
   speedValue.textContent = String(Math.min(kmh, 999)).padStart(3, "0");
-  lapValue.textContent = String(lap);
+  lapValue.textContent = `${lap} / ${getRaceLapTotal()}`;
   currentLapValue.textContent = formatTime(elapsed);
   bestLapValue.textContent = bestLap === null ? "--.---" : formatTime(bestLap);
   gearValue.textContent = estimateGear(kmh);

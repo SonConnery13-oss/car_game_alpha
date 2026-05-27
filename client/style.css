@@ -904,6 +904,10 @@ button {
   font-size: 0.96rem;
 }
 
+.lap-panel #lapValue {
+  white-space: nowrap;
+}
+
 .gear-panel {
   padding: 14px 16px;
   text-align: center;
