@@ -28,49 +28,9 @@
             <button class="menu-button" id="mainLoginButton" type="button">Login</button>
             <button class="menu-button" id="developersButton" type="button">Game Developers</button>
             <button class="menu-button" id="garageButton" type="button">Garage</button>
+            <button class="menu-button" id="mapButton" type="button">Map Settings</button>
             <button class="menu-button" id="rankingsButton" type="button">Rankings</button>
             <button class="menu-button" id="helpButton" type="button">You Need Help?</button>
-          </div>
-          <div class="course-picker" aria-label="Course selector">
-            <span>Course</span>
-            <div class="course-grid">
-              <button class="course-option is-selected" type="button" data-course-id="map1">
-                <strong>Akina Ridge</strong>
-                <small>7.5 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="map2">
-                <strong>Iroha Switchbacks</strong>
-                <small>5.1 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="map3">
-                <strong>Happo Forest</strong>
-                <small>5.5 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="akagi">
-                <strong>Akagi Pass</strong>
-                <small>5.8 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="sadamine">
-                <strong>Sadamine Pass</strong>
-                <small>6.8 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="tsukuba">
-                <strong>Tsukuba Fruits Line</strong>
-                <small>6.8 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="monaco">
-                <strong>Monaco GP Street Circuit</strong>
-                <small>3.3 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="spa">
-                <strong>Spa Ardennes Circuit</strong>
-                <small>7.0 km</small>
-              </button>
-              <button class="course-option" type="button" data-course-id="suspension">
-                <strong>Suspension Testing Ground</strong>
-                <small>Free drive</small>
-              </button>
-            </div>
           </div>
           <div id="authPanel" class="auth-panel" aria-label="Player account">
             <div class="auth-heading">
@@ -187,6 +147,60 @@
               <span class="garage-preview garage-preview-formula"></span>
               <strong>Formula RB22</strong>
             </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="mapScreen" class="menu-screen" aria-label="Map settings" hidden>
+        <div class="map-card">
+          <div class="map-header">
+            <div>
+              <p class="menu-kicker">MAP SETTINGS</p>
+              <h2>Select Map</h2>
+            </div>
+            <button class="menu-button" data-menu-back type="button">Back</button>
+          </div>
+
+          <div class="course-picker map-picker" aria-label="Course selector">
+            <span>Course</span>
+            <div class="course-grid">
+              <button class="course-option is-selected" type="button" data-course-id="map1">
+                <strong>Akina Ridge</strong>
+                <small>7.5 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="map2">
+                <strong>Iroha Switchbacks</strong>
+                <small>5.1 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="map3">
+                <strong>Happo Forest</strong>
+                <small>5.5 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="akagi">
+                <strong>Akagi Pass</strong>
+                <small>5.8 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="sadamine">
+                <strong>Sadamine Pass</strong>
+                <small>6.8 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="tsukuba">
+                <strong>Tsukuba Fruits Line</strong>
+                <small>6.8 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="monaco">
+                <strong>Monaco GP Street Circuit</strong>
+                <small>3.3 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="spa">
+                <strong>Spa Ardennes Circuit</strong>
+                <small>7.0 km</small>
+              </button>
+              <button class="course-option" type="button" data-course-id="suspension">
+                <strong>Suspension Testing Ground</strong>
+                <small>Free drive</small>
+              </button>
+            </div>
           </div>
         </div>
       </section>

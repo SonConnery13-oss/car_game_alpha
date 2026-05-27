@@ -85,6 +85,7 @@ button {
 .screen-card,
 .garage-card,
 .auth-card,
+.map-card,
 .rankings-card,
 .help-card {
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -133,6 +134,7 @@ button {
   overflow-wrap: normal;
 }
 
+.map-card h2,
 .rankings-card h2,
 .help-card h2 {
   margin: 0;
@@ -152,10 +154,6 @@ button {
 }
 
 #gameStartButton {
-  grid-column: 1 / -1;
-}
-
-#helpButton {
   grid-column: 1 / -1;
 }
 
@@ -434,6 +432,7 @@ button {
 .screen-card,
 .garage-card,
 .auth-card,
+.map-card,
 .rankings-card,
 .help-card {
   padding: clamp(22px, 4vw, 40px);
@@ -512,11 +511,16 @@ button {
     padding: 14px;
   }
 
+  .map-card {
+    gap: 12px;
+  }
+
   .selected-car-preview {
     min-height: clamp(180px, 34vh, 280px);
   }
 }
 
+.map-card,
 .rankings-card {
   display: grid;
   gap: 16px;
@@ -524,6 +528,10 @@ button {
   max-height: min(88vh, 780px);
   overflow: auto;
   justify-self: center;
+}
+
+.map-card {
+  gap: 18px;
 }
 
 .help-card {
@@ -537,6 +545,7 @@ button {
 
 .rankings-header,
 .rankings-title,
+.map-header,
 .help-header {
   display: flex;
   gap: 14px;
@@ -545,8 +554,13 @@ button {
 }
 
 .rankings-header .menu-button,
+.map-header .menu-button,
 .help-header .menu-button {
   min-width: 86px;
+}
+
+.map-picker {
+  margin-top: 0;
 }
 
 .help-controls {
@@ -1398,6 +1412,7 @@ button {
   .screen-card,
   .garage-card,
   .auth-card,
+  .map-card,
   .rankings-card,
   .help-card {
     width: min(100%, 300px);
@@ -1440,6 +1455,7 @@ button {
 
   .rankings-header,
   .rankings-title,
+  .map-header,
   .help-header {
     align-items: stretch;
     flex-direction: column;

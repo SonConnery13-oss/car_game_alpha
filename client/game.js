@@ -20,12 +20,14 @@ const message = document.querySelector("#message");
 const mainMenu = document.querySelector("#mainMenu");
 const developersScreen = document.querySelector("#developersScreen");
 const garageScreen = document.querySelector("#garageScreen");
+const mapScreen = document.querySelector("#mapScreen");
 const rankingsScreen = document.querySelector("#rankingsScreen");
 const helpScreen = document.querySelector("#helpScreen");
 const gameStartButton = document.querySelector("#gameStartButton");
 const mainLoginButton = document.querySelector("#mainLoginButton");
 const developersButton = document.querySelector("#developersButton");
 const garageButton = document.querySelector("#garageButton");
+const mapButton = document.querySelector("#mapButton");
 const rankingsButton = document.querySelector("#rankingsButton");
 const helpButton = document.querySelector("#helpButton");
 const selectedCarName = document.querySelector("#selectedCarName");
@@ -6640,6 +6642,7 @@ function setupMenu() {
   mainLoginButton?.addEventListener("click", () => showMenuScreen("login"));
   developersButton?.addEventListener("click", () => showMenuScreen("developers"));
   garageButton?.addEventListener("click", () => showMenuScreen("garage"));
+  mapButton?.addEventListener("click", () => showMenuScreen("map"));
   rankingsButton?.addEventListener("click", () => showMenuScreen("rankings"));
   helpButton?.addEventListener("click", () => showMenuScreen("help"));
   joinRoomButton?.addEventListener("click", () => joinMultiplayerRoom(getEnteredRoomId()));
@@ -6697,6 +6700,7 @@ function showMenuScreen(screen) {
   if (mainMenu) mainMenu.classList.add("is-hidden");
   if (developersScreen) developersScreen.hidden = screen !== "developers";
   if (garageScreen) garageScreen.hidden = screen !== "garage";
+  if (mapScreen) mapScreen.hidden = screen !== "map";
   if (rankingsScreen) rankingsScreen.hidden = screen !== "rankings";
   if (helpScreen) helpScreen.hidden = screen !== "help";
   if (loginScreen) loginScreen.hidden = screen !== "login";
@@ -6709,6 +6713,7 @@ function showMainMenu() {
   blurActiveUiControl();
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
+  if (mapScreen) mapScreen.hidden = true;
   if (rankingsScreen) rankingsScreen.hidden = true;
   if (helpScreen) helpScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
@@ -6734,6 +6739,7 @@ function returnToMenu() {
   mainMenu?.classList.remove("is-hidden");
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
+  if (mapScreen) mapScreen.hidden = true;
   if (rankingsScreen) rankingsScreen.hidden = true;
   if (helpScreen) helpScreen.hidden = true;
   if (menuReturnButton) menuReturnButton.hidden = true;
@@ -6741,6 +6747,7 @@ function returnToMenu() {
   message.textContent = "READY";
   message.classList.add("is-visible");
   if (rankingsScreen) rankingsScreen.hidden = true;
+  if (mapScreen) mapScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
   if (signupScreen) signupScreen.hidden = true;
 }
