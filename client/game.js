@@ -223,7 +223,7 @@ let rankingsCourseId = selectedCourseId;
 let activeCourse = COURSE_DEFS[selectedCourseId];
 let skyDome = null;
 const ROAD_WIDTH = activeCourse.roadWidth ?? DEFAULT_ROAD_WIDTH;
-const START_GRID_WIDTH = ROAD_WIDTH;
+const START_GRID_WIDTH = activeCourse.startGridWidth ?? ROAD_WIDTH;
 const RACE_GRID_SPACING = 4.8;
 const RACE_GRID_ROW_SPACING = 5.8;
 const trackPoints = createTrackPoints(activeCourse);
@@ -1248,8 +1248,9 @@ function createLowTrackWalls() {
   const wallOptions = {
     height: activeCourse.wallHeight ?? 0.52,
     thickness: activeCourse.wallThickness ?? 0.34,
-    endGap: activeCourse.visualProfile === "monacoStreet" ? 0.42 : 1.05,
-    segmentStep: activeCourse.visualProfile === "monacoStreet" ? 4 : 6,
+    endGap: activeCourse.wallEndGap ?? (activeCourse.visualProfile === "monacoStreet" ? 0.08 : 1.05),
+    segmentStep: activeCourse.wallSegmentStep ?? (activeCourse.visualProfile === "monacoStreet" ? 2 : 6),
+    continuous: activeCourse.continuousWalls ?? false,
   };
 
   createLowWallLoop(offset, wallMaterial, wallOptions);
@@ -1388,17 +1389,21 @@ function createLowWallLoop(offset, material, options = {}) {
   const segmentLimit = activeCourse.loop ? trackPoints.length : trackPoints.length - segmentStep;
 
   for (let i = 0; i < segmentLimit; i += segmentStep) {
-    const a = getOffsetTrackPoint(i, offset);
     const nextIndex = activeCourse.loop ? (i + segmentStep) % trackPoints.length : Math.min(i + segmentStep, trackPoints.length - 1);
-    const b = getOffsetTrackPoint(nextIndex, offset);
+    const a = getOffsetTrackPoint(i, getRoadEdgeAwareOffset(offset, i));
+    const b = getOffsetTrackPoint(nextIndex, getRoadEdgeAwareOffset(offset, nextIndex));
     const midpoint = a.clone().add(b).multiplyScalar(0.5);
 
-    if (shouldSkipTrackWallSegment(i, midpoint)) continue;
+    if (shouldSkipTrackWallSegment(i, midpoint, options)) continue;
     createLowWallSegment(a, b, material, options.height ?? 0.52, options.thickness ?? 0.34, options.endGap ?? 1.05);
   }
 }
 
-function shouldSkipTrackWallSegment(index, midpoint) {
+function shouldSkipTrackWallSegment(index, midpoint, options = {}) {
+  if (options.continuous) {
+    return isNearBridgeAccess(midpoint.x, midpoint.y, 18) || isNearTestArea(midpoint.x, midpoint.y, 14);
+  }
+
   const startPoint = trackPoints[0];
   const finishPoint = trackPoints[trackPoints.length - 1];
   const nearStartIndex = index < 22 || (activeCourse.loop && index > trackPoints.length - 22);
@@ -1781,6 +1786,7 @@ function createMonacoStreetScenery() {
   createMonacoHarborWater();
   createMonacoTunnel();
   createMonacoLandmarkBuildings();
+  createMonacoTracksideBuildings();
   createYachtMarina();
   createMonacoBarrierStripes();
   createMonacoWallPanels();
@@ -1916,6 +1922,71 @@ function createMonacoLandmarkBuildings() {
   }
 }
 
+function createMonacoTracksideBuildings() {
+  const zones = activeCourse.tracksideBuildings ?? [];
+  if (!zones.length) return;
+
+  const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x303234, roughness: 0.82 });
+  const trimMaterial = new THREE.MeshStandardMaterial({ color: 0xf3efe2, roughness: 0.64 });
+
+  for (const zone of zones) {
+    const sides = zone.sides ?? [zone.side ?? 1];
+    const indices = getTrackSectionIndices(zone.start, zone.end, zone.step ?? 18);
+
+    for (let buildingIndex = 0; buildingIndex < indices.length; buildingIndex += 1) {
+      const index = indices[buildingIndex];
+      const point = trackPoints[index];
+      const tangent = getTrackTangent(index);
+      const normal = getTrackNormal(index);
+      const yaw = Math.atan2(tangent.x, tangent.y);
+      const seed = pseudoRandom(index * 5.73 + buildingIndex * 17.1);
+      const width = (zone.width ?? 16) * (0.82 + seed * 0.36);
+      const depth = (zone.depth ?? 13) * (0.88 + pseudoRandom(index * 2.4) * 0.3);
+      const height = (zone.minHeight ?? 14) + pseudoRandom(index * 3.2) * ((zone.maxHeight ?? 34) - (zone.minHeight ?? 14));
+      const color = zone.colors?.[Math.floor(seed * zone.colors.length) % zone.colors.length] ?? 0xd7d1c0;
+      const facadeMaterial = new THREE.MeshStandardMaterial({
+        map: makeBuildingTexture(color, zone.windowColor ?? 0xcfe7f1),
+        roughness: 0.7,
+        metalness: 0.02,
+      });
+
+      for (const side of sides) {
+        const offset = zone.offset ?? getRoadsideObjectOffset(depth * 0.5 + 5.5);
+        const lateral = point.clone().addScaledVector(normal, side * offset);
+        const base = lateral.addScaledVector(tangent, (seed - 0.5) * (zone.jitter ?? 4));
+        if (!isRectFootprintClearOfTrack(base.x, base.y, width, depth, yaw, zone.clearance ?? 1.8)) continue;
+
+        const groundY = getTrackElevation(base.x, base.y);
+        const building = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), facadeMaterial);
+        body.position.y = height / 2;
+        body.castShadow = true;
+        body.receiveShadow = true;
+        building.add(body);
+
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(width + 0.5, 0.32, depth + 0.5), roofMaterial);
+        roof.position.y = height + 0.18;
+        roof.castShadow = true;
+        building.add(roof);
+
+        if (zone.balconies !== false) {
+          const balconyCount = Math.max(2, Math.floor(height / 6));
+          for (let floor = 1; floor <= balconyCount; floor += 1) {
+            const balcony = new THREE.Mesh(new THREE.BoxGeometry(width * 0.72, 0.12, 0.42), trimMaterial);
+            balcony.position.set(0, floor * (height / (balconyCount + 1)), side * -(depth / 2 + 0.24));
+            balcony.castShadow = true;
+            building.add(balcony);
+          }
+        }
+
+        building.position.set(base.x, groundY, base.y);
+        building.rotation.y = yaw;
+        scene.add(building);
+      }
+    }
+  }
+}
+
 function createYachtMarina() {
   for (const section of activeCourse.yachtSections ?? []) {
     const count = section.count ?? 5;
@@ -1978,7 +2049,10 @@ function createMonacoBarrierStripes() {
     const yaw = Math.atan2(tangent.x, tangent.y);
 
     for (const side of [-1, 1]) {
-      const base = point.clone().addScaledVector(normal, side * (ROAD_WIDTH / 2 + (activeCourse.wallOffset ?? 0.55) + 0.08));
+      const base = point.clone().addScaledVector(
+        normal,
+        getRoadEdgeAwareOffset(side * (ROAD_WIDTH / 2 + (activeCourse.wallOffset ?? 0.55) + 0.08), i),
+      );
       const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.56, 1.65), stripeMaterial);
       stripe.position.set(base.x, getTrackElevation(base.x, base.y) + 0.8, base.y);
       stripe.rotation.y = yaw;
@@ -2366,7 +2440,10 @@ function createMonacoWallPanels() {
       for (const side of sides) {
         const base = point.clone().addScaledVector(
           normal,
-          side * (ROAD_WIDTH / 2 + (activeCourse.wallOffset ?? 0.55) + (activeCourse.wallThickness ?? 0.5) * 0.5 + 0.08),
+          getRoadEdgeAwareOffset(
+            side * (ROAD_WIDTH / 2 + (activeCourse.wallOffset ?? 0.55) + (activeCourse.wallThickness ?? 0.5) * 0.5 + 0.08),
+            index,
+          ),
         );
         const panel = new THREE.Mesh(new THREE.PlaneGeometry(zone.width ?? 5.4, zone.height ?? 0.86), material);
         panel.position.set(base.x, getTrackElevation(base.x, base.y) + (zone.y ?? 1.16), base.y);
@@ -4449,7 +4526,12 @@ function createAmgCarMesh() {
 
 function createTrackPoints(course = activeCourse) {
   const controlPoints = course.controlPoints.map(([x, z]) => new THREE.Vector3(x, 0, z));
-  const curve = new THREE.CatmullRomCurve3(controlPoints, course.loop, "catmullrom", 0.45);
+  const curve = new THREE.CatmullRomCurve3(
+    controlPoints,
+    course.loop,
+    course.curveType ?? "catmullrom",
+    course.curveTension ?? 0.45,
+  );
   const sampled = curve.getSpacedPoints(course.samples ?? 360);
   const points = sampled.map((point) => new THREE.Vector2(point.x, point.z));
 
@@ -4641,14 +4723,15 @@ function createRibbonMesh(width, y, material, centerOffset = 0, crossSegments = 
   for (let i = 0; i < trackPoints.length; i += 1) {
     const point = trackPoints[i];
     const normal = getTrackNormal(i);
-    const center = point.clone().addScaledVector(normal, centerOffset);
+    const sampleWidth = getRibbonWidthAtIndex(width, i);
+    const center = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(centerOffset, i));
 
     if (previous) distance += center.distanceTo(previous);
     previous = center;
 
     for (let column = 0; column < columns; column += 1) {
       const t = column / (columns - 1);
-      const lateralOffset = THREE.MathUtils.lerp(width / 2, -width / 2, t);
+      const lateralOffset = THREE.MathUtils.lerp(sampleWidth / 2, -sampleWidth / 2, t);
       const sample = center.clone().addScaledVector(normal, lateralOffset);
 
       vertices.push(sample.x, getTrackElevation(sample.x, sample.y) + y, sample.y);
@@ -4724,14 +4807,16 @@ function makeCurbGeometry(side, parity) {
     const normalB = getTrackNormal(next);
     const a = trackPoints[i];
     const b = trackPoints[next];
-    const innerOffset = side * (ROAD_WIDTH / 2 + 0.12);
-    const outerOffset = side * (ROAD_WIDTH / 2 + 1.02);
+    const innerOffsetA = getRoadEdgeAwareOffset(side * (ROAD_WIDTH / 2 + 0.12), i);
+    const outerOffsetA = getRoadEdgeAwareOffset(side * (ROAD_WIDTH / 2 + 1.02), i);
+    const innerOffsetB = getRoadEdgeAwareOffset(side * (ROAD_WIDTH / 2 + 0.12), next);
+    const outerOffsetB = getRoadEdgeAwareOffset(side * (ROAD_WIDTH / 2 + 1.02), next);
     const v = vertices.length / 3;
 
-    const p1 = a.clone().addScaledVector(normalA, innerOffset);
-    const p2 = a.clone().addScaledVector(normalA, outerOffset);
-    const p3 = b.clone().addScaledVector(normalB, innerOffset);
-    const p4 = b.clone().addScaledVector(normalB, outerOffset);
+    const p1 = a.clone().addScaledVector(normalA, innerOffsetA);
+    const p2 = a.clone().addScaledVector(normalA, outerOffsetA);
+    const p3 = b.clone().addScaledVector(normalB, innerOffsetB);
+    const p4 = b.clone().addScaledVector(normalB, outerOffsetB);
 
     vertices.push(
       p1.x,
@@ -4832,6 +4917,45 @@ function getOffsetTrackPoint(index, offset) {
   return trackPoints[wrappedIndex].clone().addScaledVector(getTrackNormal(wrappedIndex), offset);
 }
 
+function getRibbonWidthAtIndex(width, index) {
+  if (Math.abs(width - ROAD_WIDTH) > 0.001) return width;
+  return getRoadWidthAtIndex(index);
+}
+
+function getRoadEdgeAwareOffset(offset, index) {
+  if (!activeCourse.roadWidthSections?.length || Math.abs(offset) < ROAD_WIDTH / 2 - 2) return offset;
+
+  const edgeInset = Math.abs(offset) - ROAD_WIDTH / 2;
+  return Math.sign(offset || 1) * (getRoadWidthAtIndex(index) / 2 + edgeInset);
+}
+
+function getRoadWidthAtIndex(index) {
+  let width = ROAD_WIDTH;
+  const progress = normalizeTrackIndex(index) / Math.max(trackPoints.length - 1, 1);
+
+  for (const section of activeCourse.roadWidthSections ?? []) {
+    const targetWidth = section.width ?? ROAD_WIDTH + (section.extraWidth ?? 0);
+    const blend = getProgressRangeBlend(progress, section.start, section.end, section.blend ?? 0.018);
+    width = THREE.MathUtils.lerp(width, targetWidth, blend);
+  }
+
+  return width;
+}
+
+function getProgressRangeBlend(progress, start, end, blend = 0.018) {
+  if (start <= end) {
+    const enters = smoothstep(start - blend, start + blend, progress);
+    const exits = 1 - smoothstep(end - blend, end + blend, progress);
+    return THREE.MathUtils.clamp(enters * exits, 0, 1);
+  }
+
+  const shiftedProgress = progress < start ? progress + 1 : progress;
+  const shiftedEnd = end + 1;
+  const enters = smoothstep(start - blend, start + blend, shiftedProgress);
+  const exits = 1 - smoothstep(shiftedEnd - blend, shiftedEnd + blend, shiftedProgress);
+  return THREE.MathUtils.clamp(enters * exits, 0, 1);
+}
+
 function isNearTrack(x, z, margin) {
   return getDistanceToTrackSquared(x, z) < margin * margin;
 }
@@ -4866,7 +4990,9 @@ function isRectFootprintClearOfTrack(x, z, width, depth, yaw = 0, buffer = 1.2) 
   return samples.every(([localX, localZ]) => {
     const sampleX = x + localX * cos + localZ * sin;
     const sampleZ = z - localX * sin + localZ * cos;
-    return !isNearTrack(sampleX, sampleZ, clearance);
+    const nearest = getNearestTrackInfo(sampleX, sampleZ);
+    const roadClearance = Math.max(clearance, getRoadWidthAtIndex(nearest.index) / 2 + buffer);
+    return nearest.distanceSquared >= roadClearance * roadClearance;
   });
 }
 
