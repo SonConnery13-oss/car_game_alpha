@@ -80,7 +80,6 @@ const FIXED_TIME_STEP = 1 / 120;
 const TERRAIN_SIZE = 1120;
 const SKY_DOME_RADIUS = 900;
 const TERRAIN_SEGMENTS = 320;
-const TERRAIN_ELEMENT_SIZE = TERRAIN_SIZE / TERRAIN_SEGMENTS;
 const WHEEL_RADIUS = 0.42;
 const SUSPENSION_REST_LENGTH = 0.27;
 const WHEEL_CONNECTION_Y = -0.16;
@@ -223,6 +222,7 @@ let rankingsCourseId = selectedCourseId;
 let activeCourse = COURSE_DEFS[selectedCourseId];
 let skyDome = null;
 const ROAD_WIDTH = activeCourse.roadWidth ?? DEFAULT_ROAD_WIDTH;
+const RENDERER_PIXEL_RATIO_LIMIT = activeCourse.maxPixelRatio ?? 2;
 const START_GRID_WIDTH = activeCourse.startGridWidth ?? ROAD_WIDTH;
 const RACE_GRID_SPACING = 4.8;
 const RACE_GRID_ROW_SPACING = 5.8;
@@ -251,7 +251,7 @@ const renderer = new THREE.WebGLRenderer({
   antialias: true,
   powerPreference: "high-performance",
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, RENDERER_PIXEL_RATIO_LIMIT));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -491,7 +491,8 @@ function setupLighting() {
   const sunPosition = activeCourse.sun ?? { x: -85, y: 120, z: -60 };
   sun.position.set(sunPosition.x, sunPosition.y, sunPosition.z);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  const shadowMapSize = activeCourse.shadowMapSize ?? 2048;
+  sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
   const shadowExtent = TERRAIN_SIZE * 0.58;
   sun.shadow.camera.left = -shadowExtent;
   sun.shadow.camera.right = shadowExtent;
@@ -775,7 +776,7 @@ function createGround() {
     activeCourse.environment === "mountain" ? 36 : 54,
     activeCourse.environment === "mountain" ? 36 : 54,
   );
-  const geometry = createTerrainGeometry(TERRAIN_SIZE, TERRAIN_SEGMENTS, -0.035);
+  const geometry = createTerrainGeometry(TERRAIN_SIZE, activeCourse.terrainSegments ?? TERRAIN_SEGMENTS, -0.035);
 
   const ground = new THREE.Mesh(
     geometry,
@@ -792,19 +793,21 @@ function createGround() {
 function createTerrainBody() {
   const data = [];
   const half = TERRAIN_SIZE / 2;
+  const segments = activeCourse.terrainSegments ?? TERRAIN_SEGMENTS;
+  const elementSize = TERRAIN_SIZE / segments;
 
-  for (let i = 0; i <= TERRAIN_SEGMENTS; i += 1) {
+  for (let i = 0; i <= segments; i += 1) {
     data[i] = [];
-    const x = -half + i * TERRAIN_ELEMENT_SIZE;
+    const x = -half + i * elementSize;
 
-    for (let j = 0; j <= TERRAIN_SEGMENTS; j += 1) {
-      const z = half - j * TERRAIN_ELEMENT_SIZE;
+    for (let j = 0; j <= segments; j += 1) {
+      const z = half - j * elementSize;
       data[i][j] = getTrackElevation(x, z);
     }
   }
 
   const heightfield = new CANNON.Heightfield(data, {
-    elementSize: TERRAIN_ELEMENT_SIZE,
+    elementSize,
     minValue: -4,
     maxValue: 8,
   });
@@ -1850,7 +1853,7 @@ function createMonacoTunnel() {
   const lightMatrices = [];
 
   for (const tunnel of activeCourse.tunnelSections ?? []) {
-    const indices = getTrackSectionIndices(tunnel.start, tunnel.end, 6);
+    const indices = getTrackSectionIndices(tunnel.start, tunnel.end, tunnel.step ?? tunnel.lightStep ?? 6);
 
     for (const index of indices) {
       const point = trackPoints[index];
@@ -4525,7 +4528,10 @@ function createAmgCarMesh() {
 }
 
 function createTrackPoints(course = activeCourse) {
-  const controlPoints = course.controlPoints.map(([x, z]) => new THREE.Vector3(x, 0, z));
+  const controlPoints = roundCourseControlPoints(
+    course.controlPoints.map(([x, z]) => new THREE.Vector3(x, 0, z)),
+    course,
+  );
   const curve = new THREE.CatmullRomCurve3(
     controlPoints,
     course.loop,
@@ -4540,6 +4546,49 @@ function createTrackPoints(course = activeCourse) {
   }
 
   return points;
+}
+
+function roundCourseControlPoints(controlPoints, course) {
+  const roundness = course.cornerRoundness ?? 0;
+  if (!roundness || controlPoints.length < 4) return controlPoints;
+
+  const threshold = THREE.MathUtils.degToRad(course.cornerRoundThreshold ?? 128);
+  const rounded = [];
+
+  for (let i = 0; i < controlPoints.length; i += 1) {
+    const point = controlPoints[i];
+    if (!course.loop && (i === 0 || i === controlPoints.length - 1)) {
+      rounded.push(point);
+      continue;
+    }
+    if (course.loop && i === 0 && course.roundStartCorner !== true) {
+      rounded.push(point);
+      continue;
+    }
+
+    const previous = controlPoints[(i - 1 + controlPoints.length) % controlPoints.length];
+    const next = controlPoints[(i + 1) % controlPoints.length];
+    const toPrevious = previous.clone().sub(point);
+    const toNext = next.clone().sub(point);
+    const previousDistance = toPrevious.length();
+    const nextDistance = toNext.length();
+    if (previousDistance < 0.001 || nextDistance < 0.001) {
+      rounded.push(point);
+      continue;
+    }
+
+    const angle = toPrevious.angleTo(toNext);
+    if (angle >= threshold) {
+      rounded.push(point);
+      continue;
+    }
+
+    const cutDistance = Math.min(roundness, previousDistance * 0.42, nextDistance * 0.42);
+    rounded.push(point.clone().addScaledVector(toPrevious.normalize(), cutDistance));
+    rounded.push(point.clone().addScaledVector(toNext.normalize(), cutDistance));
+  }
+
+  return rounded;
 }
 
 function getCheckpointIndices(course = activeCourse) {
@@ -5293,7 +5342,7 @@ function bindInput() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, RENDERER_PIXEL_RATIO_LIMIT));
   });
 
   readyTimeout = window.setTimeout(() => {
