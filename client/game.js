@@ -7032,7 +7032,9 @@ function setupMenu() {
   }
 
   for (const option of garageOptions) {
-    option.addEventListener("click", () => selectCar(option.dataset.carId));
+    option.addEventListener("click", () => {
+      if (selectCar(option.dataset.carId)) showMenuScreen("setup");
+    });
   }
 
   for (const option of courseOptions) {
@@ -7400,17 +7402,16 @@ async function startPreRaceSequence({ startAt = null } = {}) {
 }
 
 function selectCar(carId) {
-  if (!CAR_MODELS[carId]) return;
+  if (!CAR_MODELS[carId]) return false;
   if (!isCarUnlocked(carId)) {
     if (hasPendingQuestReward(carId) && claimQuestReward(carId)) {
-      selectCar(carId);
-      return;
+      return selectCar(carId);
     }
     flashMessage("QUEST REQUIRED");
     showMenuScreen("quest");
-    return;
+    return false;
   }
-  if (carId === selectedCarId) return;
+  if (carId === selectedCarId) return true;
 
   selectedCarId = carId;
   vehiclePhysicsConfig = getVehiclePhysicsConfig(selectedCarId);
@@ -7423,6 +7424,7 @@ function selectCar(carId) {
   updateWheelStyle();
   updateSelectedCarUi();
   sendMultiplayerProfile();
+  return true;
 }
 
 function ensureSelectedCarUnlocked() {
@@ -9492,9 +9494,9 @@ function updateCamera(delta) {
     desiredPosition = target.clone().add(orbitOffset);
     lookTarget = target.clone().add(up.clone().multiplyScalar(0.3));
   } else if (cameraMode === 0) {
-    const distance = THREE.MathUtils.lerp(7.9, 6.75, speedFactor) + (tuning.cameraDistanceOffset ?? 0) * 0.65;
-    const height = THREE.MathUtils.lerp(4.05, 4.86, speedFactor) + (tuning.cameraHeightOffset ?? 0) * 0.72;
-    const lookAhead = THREE.MathUtils.lerp(9.2, 13.4, speedFactor) + (tuning.cameraLookAheadOffset ?? 0) * 0.66;
+    const distance = THREE.MathUtils.lerp(6.7, 5.75, speedFactor) + (tuning.cameraDistanceOffset ?? 0) * 0.65;
+    const height = THREE.MathUtils.lerp(3.85, 4.52, speedFactor) + (tuning.cameraHeightOffset ?? 0) * 0.72;
+    const lookAhead = THREE.MathUtils.lerp(8.4, 12.0, speedFactor) + (tuning.cameraLookAheadOffset ?? 0) * 0.66;
     desiredPosition = target.clone().addScaledVector(cameraRig.forward, -distance).add(up.clone().multiplyScalar(height));
     lookTarget = target.clone().addScaledVector(cameraRig.forward, lookAhead).add(up.clone().multiplyScalar(0.15));
   } else {
@@ -9511,10 +9513,10 @@ function updateCamera(delta) {
   if (cameraRig.shakeIntensity > 0.001) {
     const time = performance.now() * 0.001;
     const shake = cameraRig.shakeIntensity;
-    desiredPosition.addScaledVector(cameraRight, (Math.sin(time * 8.2) + Math.sin(time * 13.7) * 0.52) * shake * 1.35);
-    desiredPosition.y += (Math.sin(time * 10.6) + Math.cos(time * 6.4) * 0.4) * shake * 0.72;
-    lookTarget.addScaledVector(cameraRight, Math.cos(time * 7.1) * shake * 0.78);
-    lookTarget.y += Math.sin(time * 5.8) * shake * 0.36;
+    desiredPosition.addScaledVector(cameraRight, (Math.sin(time * 13.5) + Math.sin(time * 22.0) * 0.52) * shake * 1.35);
+    desiredPosition.y += (Math.sin(time * 17.5) + Math.cos(time * 11.5) * 0.4) * shake * 0.72;
+    lookTarget.addScaledVector(cameraRight, Math.cos(time * 15.0) * shake * 0.78);
+    lookTarget.y += Math.sin(time * 9.5) * shake * 0.36;
   }
 
   const positionBlend = 1 - Math.exp(-(cameraMode === 0 ? 6.4 + speedFactor * 4.8 : 9.5) * delta);
