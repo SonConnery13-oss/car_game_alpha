@@ -28,6 +28,7 @@
             <button class="menu-button" id="mainLoginButton" type="button">Login</button>
             <button class="menu-button" id="developersButton" type="button">Game Developers</button>
             <button class="menu-button" id="garageButton" type="button">Garage</button>
+            <button class="menu-button" id="questButton" type="button">Quest</button>
             <button class="menu-button" id="mapButton" type="button">Map Settings</button>
             <button class="menu-button" id="rankingsButton" type="button">Rankings</button>
             <button class="menu-button" id="helpButton" type="button">You Need Help?</button>
@@ -250,6 +251,20 @@
               </section>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section id="questScreen" class="menu-screen" aria-label="Quest" hidden>
+        <div class="quest-card">
+          <div class="quest-header">
+            <div>
+              <p class="menu-kicker">QUEST</p>
+              <h2>Rewards</h2>
+            </div>
+            <button class="menu-button" data-menu-back type="button">Back</button>
+          </div>
+
+          <div id="questList" class="quest-list" aria-label="Car unlock quests"></div>
         </div>
       </section>
 

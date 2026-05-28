@@ -21,12 +21,14 @@ const mainMenu = document.querySelector("#mainMenu");
 const developersScreen = document.querySelector("#developersScreen");
 const garageScreen = document.querySelector("#garageScreen");
 const mapScreen = document.querySelector("#mapScreen");
+const questScreen = document.querySelector("#questScreen");
 const rankingsScreen = document.querySelector("#rankingsScreen");
 const helpScreen = document.querySelector("#helpScreen");
 const gameStartButton = document.querySelector("#gameStartButton");
 const mainLoginButton = document.querySelector("#mainLoginButton");
 const developersButton = document.querySelector("#developersButton");
 const garageButton = document.querySelector("#garageButton");
+const questButton = document.querySelector("#questButton");
 const mapButton = document.querySelector("#mapButton");
 const rankingsButton = document.querySelector("#rankingsButton");
 const helpButton = document.querySelector("#helpButton");
@@ -40,6 +42,7 @@ const selectedCourseName = document.querySelector("#selectedCourseName");
 const rankingsCourseName = document.querySelector("#rankingsCourseName");
 const rankingsBody = document.querySelector("#rankingsBody");
 const rankingsCarMix = document.querySelector("#rankingsCarMix");
+const questList = document.querySelector("#questList");
 const lapLabel = document.querySelector("#lapLabel");
 const menuBackButtons = document.querySelectorAll("[data-menu-back]");
 const menuReturnButton = document.querySelector("#menuReturnButton");
@@ -78,6 +81,7 @@ const STORAGE_KEYS = {
   accounts: "racing.accounts.v1",
   session: "racing.session.v1",
   leaderboard: "racing.leaderboard.v1",
+  quests: "racing.quests.v1",
   room: "racing.room.v1",
 };
 const DEFAULT_ROAD_WIDTH = 14;
@@ -224,6 +228,52 @@ const CAR_MODELS = {
   },
 };
 const DRIFT_BOOST_CAR_IDS = new Set(["ae86", "rx7fd", "rx7fc"]);
+const DEFAULT_UNLOCKED_CARS = ["gt3"];
+const TOUGE_COURSE_IDS = new Set(["map1", "map2", "map3", "akagi", "sadamine", "tsukuba"]);
+const F1_COURSE_IDS = new Set(["monaco", "spa"]);
+const TOUGE_REWARD_CAR_IDS = ["ae86", "rx7fd", "rx7fc"];
+const QUEST_DEFS = [
+  {
+    id: "unlock-amg",
+    rewardCarId: "amg",
+    title: "Unlock AMG GT Track",
+    category: "F1 Track",
+    targetTime: 10 * 60 * 1000,
+    description: "Finish Monaco or Spa within 10:00, then claim this reward here.",
+  },
+  {
+    id: "unlock-ae86",
+    rewardCarId: "ae86",
+    title: "Unlock AE86 H2 Trueno",
+    category: "Touge Track",
+    targetTime: 5 * 60 * 1000,
+    description: "Finish any Touge track within 5:00. A locked Touge car is selected at random.",
+  },
+  {
+    id: "unlock-rx7fd",
+    rewardCarId: "rx7fd",
+    title: "Unlock RX-7 FD Spirit",
+    category: "Touge Track",
+    targetTime: 5 * 60 * 1000,
+    description: "Finish any Touge track within 5:00. Repeat the quest until this reward appears.",
+  },
+  {
+    id: "unlock-rx7fc",
+    rewardCarId: "rx7fc",
+    title: "Unlock RX-7 FC Turbo",
+    category: "Touge Track",
+    targetTime: 5 * 60 * 1000,
+    description: "Finish any Touge track within 5:00. Repeat the quest until this reward appears.",
+  },
+  {
+    id: "unlock-formula-rb22",
+    rewardCarId: "formulaRb22",
+    title: "Unlock Formula RB22",
+    category: "F1 Track",
+    targetTime: 8 * 60 * 1000,
+    description: "Finish Monaco or Spa within 8:00, then claim this reward here.",
+  },
+];
 const DRIFT_BOOST_CHARGE_MIN = 0.015;
 const DRIFT_BOOST_DRAIN_MIN = 0.055;
 const DRIFT_BOOST_DRAIN_MAX = 0.095;
@@ -489,6 +539,7 @@ let raceCountdownToken = 0;
 let raceFinished = false;
 let currentPlayer = null;
 let sharedLeaderboard = {};
+let questScrollTimeout = null;
 
 setupLighting();
 createWorld();
@@ -5748,7 +5799,9 @@ function initializeAuth() {
   const accounts = loadStoredJson(STORAGE_KEYS.accounts, {});
   const account = session?.key ? accounts[session.key] : null;
   currentPlayer = account ? { id: account.id, key: session.key } : null;
+  ensureSelectedCarUnlocked();
   updateAuthUi();
+  renderQuestScreen();
 }
 
 function signUpPlayer() {
@@ -5791,7 +5844,9 @@ function loginPlayer() {
 function logoutPlayer() {
   currentPlayer = null;
   localStorage.removeItem(STORAGE_KEYS.session);
+  ensureSelectedCarUnlocked();
   updateAuthUi();
+  renderQuestScreen();
   sendMultiplayerProfile();
   showAuthStatus("Logged out.");
   showMainMenu();
@@ -5800,7 +5855,9 @@ function logoutPlayer() {
 function setCurrentPlayer(key, id) {
   currentPlayer = { key, id };
   saveStoredJson(STORAGE_KEYS.session, { key });
+  ensureSelectedCarUnlocked();
   updateAuthUi();
+  renderQuestScreen();
   sendMultiplayerProfile();
 }
 
@@ -5861,6 +5918,182 @@ function loadStoredJson(key, fallback) {
 
 function saveStoredJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function getQuestStore() {
+  return loadStoredJson(STORAGE_KEYS.quests, {});
+}
+
+function saveQuestStore(store) {
+  saveStoredJson(STORAGE_KEYS.quests, store);
+}
+
+function createDefaultQuestProfile() {
+  return {
+    unlockedCars: [...DEFAULT_UNLOCKED_CARS],
+    pendingRewards: {},
+    bestRuns: {},
+  };
+}
+
+function getQuestProfile(playerKey = currentPlayer?.key) {
+  const profile = currentPlayer && playerKey
+    ? (getQuestStore()[playerKey] ?? createDefaultQuestProfile())
+    : createDefaultQuestProfile();
+  const unlockedCars = Array.isArray(profile.unlockedCars) ? profile.unlockedCars : DEFAULT_UNLOCKED_CARS;
+  const pendingRewards = profile.pendingRewards && typeof profile.pendingRewards === "object" ? profile.pendingRewards : {};
+  const bestRuns = profile.bestRuns && typeof profile.bestRuns === "object" ? profile.bestRuns : {};
+  return {
+    unlockedCars: [...new Set([...DEFAULT_UNLOCKED_CARS, ...unlockedCars].filter((carId) => CAR_MODELS[carId]))],
+    pendingRewards: Object.fromEntries(Object.entries(pendingRewards).filter(([carId]) => CAR_MODELS[carId])),
+    bestRuns,
+  };
+}
+
+function saveQuestProfile(profile, playerKey = currentPlayer?.key) {
+  if (!currentPlayer || !playerKey) return;
+  const store = getQuestStore();
+  store[playerKey] = {
+    unlockedCars: [...new Set([...DEFAULT_UNLOCKED_CARS, ...(profile.unlockedCars ?? [])])],
+    pendingRewards: profile.pendingRewards ?? {},
+    bestRuns: profile.bestRuns ?? {},
+  };
+  saveQuestStore(store);
+}
+
+function isCarUnlocked(carId) {
+  if (!CAR_MODELS[carId]) return false;
+  return getQuestProfile().unlockedCars.includes(carId);
+}
+
+function unlockCarInProfile(profile, carId) {
+  if (!CAR_MODELS[carId]) return false;
+  if (profile.unlockedCars.includes(carId)) return false;
+  profile.unlockedCars.push(carId);
+  return true;
+}
+
+function queueQuestReward(profile, carId, questId, finishTime) {
+  if (!CAR_MODELS[carId] || profile.unlockedCars.includes(carId) || profile.pendingRewards[carId]) return false;
+  profile.pendingRewards[carId] = {
+    questId,
+    courseId: selectedCourseId,
+    time: finishTime,
+    completedAt: Date.now(),
+  };
+  return true;
+}
+
+function processQuestRaceFinish(finishTime) {
+  if (!currentPlayer) return [];
+
+  const profile = getQuestProfile();
+  const awarded = [];
+  const bestKey = F1_COURSE_IDS.has(selectedCourseId) ? "f1" : TOUGE_COURSE_IDS.has(selectedCourseId) ? "touge" : null;
+  if (bestKey) {
+    const previousBest = Number(profile.bestRuns[bestKey]);
+    if (!Number.isFinite(previousBest) || finishTime < previousBest) profile.bestRuns[bestKey] = finishTime;
+  }
+
+  if (F1_COURSE_IDS.has(selectedCourseId)) {
+    if (finishTime <= 10 * 60 * 1000 && queueQuestReward(profile, "amg", "unlock-amg", finishTime)) awarded.push("amg");
+    if (finishTime <= 8 * 60 * 1000 && queueQuestReward(profile, "formulaRb22", "unlock-formula-rb22", finishTime)) {
+      awarded.push("formulaRb22");
+    }
+  }
+
+  if (TOUGE_COURSE_IDS.has(selectedCourseId) && finishTime <= 5 * 60 * 1000) {
+    const availableTougeRewards = TOUGE_REWARD_CAR_IDS.filter(
+      (carId) => !profile.unlockedCars.includes(carId) && !profile.pendingRewards[carId],
+    );
+    const rewardCarId = availableTougeRewards[Math.floor(Math.random() * availableTougeRewards.length)];
+    if (rewardCarId && queueQuestReward(profile, rewardCarId, `unlock-${rewardCarId}`, finishTime)) awarded.push(rewardCarId);
+  }
+
+  saveQuestProfile(profile);
+  if (awarded.length) {
+    renderQuestScreen();
+    flashMessage("QUEST COMPLETE");
+  }
+  return awarded;
+}
+
+function handleQuestListClick(event) {
+  const button = event.target.closest("[data-claim-car-id]");
+  if (!button) return;
+  claimQuestReward(button.dataset.claimCarId);
+}
+
+function handleQuestScroll() {
+  questList?.classList.add("is-scrolling");
+  window.clearTimeout(questScrollTimeout);
+  questScrollTimeout = window.setTimeout(() => {
+    questList?.classList.remove("is-scrolling");
+  }, 180);
+}
+
+function claimQuestReward(carId) {
+  if (!currentPlayer || !CAR_MODELS[carId]) return;
+  const profile = getQuestProfile();
+  if (!profile.pendingRewards[carId]) return;
+  delete profile.pendingRewards[carId];
+  unlockCarInProfile(profile, carId);
+  saveQuestProfile(profile);
+  updateSelectedCarUi();
+  renderQuestScreen();
+  flashMessage(`${CAR_MODELS[carId].name} UNLOCKED`);
+}
+
+function renderQuestScreen() {
+  if (!questList) return;
+  questList.replaceChildren();
+
+  if (!currentPlayer) {
+    const empty = document.createElement("article");
+    empty.className = "quest-item";
+    empty.append(
+      createTextElement("strong", "Login required"),
+      createTextElement("span", "Log in or sign up to save quest rewards and unlock cars."),
+    );
+    questList.append(empty);
+    return;
+  }
+
+  const profile = getQuestProfile();
+  for (const quest of QUEST_DEFS) {
+    const rewardName = getCarName(quest.rewardCarId);
+    const unlocked = profile.unlockedCars.includes(quest.rewardCarId);
+    const pending = profile.pendingRewards[quest.rewardCarId];
+    const item = document.createElement("article");
+    item.className = "quest-item";
+    item.classList.toggle("is-complete", unlocked);
+    item.classList.toggle("is-claimable", Boolean(pending) && !unlocked);
+
+    const meta = document.createElement("div");
+    meta.className = "quest-meta";
+    meta.append(createTextElement("span", quest.category), createTextElement("span", `Target ${formatTime(quest.targetTime)}`));
+
+    const status = createTextElement("span", unlocked ? "Unlocked" : pending ? "Reward ready" : "Locked");
+    status.className = "quest-status";
+
+    const action = document.createElement("button");
+    action.className = "menu-button quest-claim-button";
+    action.type = "button";
+    action.dataset.claimCarId = quest.rewardCarId;
+    action.disabled = unlocked || !pending;
+    action.textContent = unlocked ? "Claimed" : pending ? "Claim Reward" : "In Progress";
+
+    const details = document.createElement("div");
+    details.className = "quest-details";
+    details.append(
+      createTextElement("strong", quest.title),
+      createTextElement("p", quest.description),
+      createTextElement("small", `Reward: ${rewardName}`),
+    );
+
+    item.append(meta, details, status, action);
+    questList.append(item);
+  }
 }
 
 function initializeMultiplayer() {
@@ -6101,7 +6334,10 @@ function setupRaceScreen({ keepResults = false } = {}) {
   mainMenu?.classList.add("is-hidden");
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
+  if (mapScreen) mapScreen.hidden = true;
   if (rankingsScreen) rankingsScreen.hidden = true;
+  if (questScreen) questScreen.hidden = true;
+  if (helpScreen) helpScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
   if (signupScreen) signupScreen.hidden = true;
   if (menuReturnButton) menuReturnButton.hidden = false;
@@ -6636,8 +6872,10 @@ function updateMultiplayerRoomStatus(totalPlayers = remotePlayers.size + (multip
 }
 
 function setupMenu() {
+  ensureSelectedCarUnlocked();
   updateSelectedCarUi();
   updateSelectedCourseUi();
+  renderQuestScreen();
   renderRankingsScreen();
   updateAuthUi();
   syncPauseButton();
@@ -6649,6 +6887,7 @@ function setupMenu() {
   mainLoginButton?.addEventListener("click", () => showMenuScreen("login"));
   developersButton?.addEventListener("click", () => showMenuScreen("developers"));
   garageButton?.addEventListener("click", () => showMenuScreen("garage"));
+  questButton?.addEventListener("click", () => showMenuScreen("quest"));
   mapButton?.addEventListener("click", () => showMenuScreen("map"));
   rankingsButton?.addEventListener("click", () => showMenuScreen("rankings"));
   helpButton?.addEventListener("click", () => showMenuScreen("help"));
@@ -6668,6 +6907,8 @@ function setupMenu() {
   authLogoutButton?.addEventListener("click", logoutPlayer);
   resultMenuButton?.addEventListener("click", returnToMenu);
   resultRetryButton?.addEventListener("click", retryRace);
+  questList?.addEventListener("click", handleQuestListClick);
+  questList?.addEventListener("scroll", handleQuestScroll);
 
   for (const button of menuBackButtons) {
     button.addEventListener("click", showMainMenu);
@@ -6699,6 +6940,10 @@ function startGame() {
     return;
   }
 
+  if (!ensureSelectedCarUnlocked()) {
+    return;
+  }
+
   requestRaceStart();
 }
 
@@ -6708,11 +6953,13 @@ function showMenuScreen(screen) {
   if (developersScreen) developersScreen.hidden = screen !== "developers";
   if (garageScreen) garageScreen.hidden = screen !== "garage";
   if (mapScreen) mapScreen.hidden = screen !== "map";
+  if (questScreen) questScreen.hidden = screen !== "quest";
   if (rankingsScreen) rankingsScreen.hidden = screen !== "rankings";
   if (helpScreen) helpScreen.hidden = screen !== "help";
   if (loginScreen) loginScreen.hidden = screen !== "login";
   if (signupScreen) signupScreen.hidden = screen !== "signup";
   if (screen === "rankings") renderRankingsScreen();
+  if (screen === "quest") renderQuestScreen();
   focusAuthScreen(screen);
 }
 
@@ -6721,6 +6968,7 @@ function showMainMenu() {
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
   if (mapScreen) mapScreen.hidden = true;
+  if (questScreen) questScreen.hidden = true;
   if (rankingsScreen) rankingsScreen.hidden = true;
   if (helpScreen) helpScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
@@ -6747,6 +6995,7 @@ function returnToMenu() {
   if (developersScreen) developersScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
   if (mapScreen) mapScreen.hidden = true;
+  if (questScreen) questScreen.hidden = true;
   if (rankingsScreen) rankingsScreen.hidden = true;
   if (helpScreen) helpScreen.hidden = true;
   if (menuReturnButton) menuReturnButton.hidden = true;
@@ -6755,6 +7004,7 @@ function returnToMenu() {
   message.classList.add("is-visible");
   if (rankingsScreen) rankingsScreen.hidden = true;
   if (mapScreen) mapScreen.hidden = true;
+  if (questScreen) questScreen.hidden = true;
   if (loginScreen) loginScreen.hidden = true;
   if (signupScreen) signupScreen.hidden = true;
 }
@@ -6841,6 +7091,12 @@ async function startPreRaceSequence({ startAt = null } = {}) {
 
 function selectCar(carId) {
   if (!CAR_MODELS[carId]) return;
+  if (!isCarUnlocked(carId)) {
+    flashMessage("QUEST LOCKED");
+    showMenuScreen("quest");
+    return;
+  }
+  if (carId === selectedCarId) return;
 
   selectedCarId = carId;
   vehiclePhysicsConfig = getVehiclePhysicsConfig(selectedCarId);
@@ -6853,6 +7109,23 @@ function selectCar(carId) {
   updateWheelStyle();
   updateSelectedCarUi();
   sendMultiplayerProfile();
+}
+
+function ensureSelectedCarUnlocked() {
+  if (isCarUnlocked(selectedCarId)) return true;
+
+  selectedCarId = DEFAULT_UNLOCKED_CARS[0];
+  vehiclePhysicsConfig = getVehiclePhysicsConfig(selectedCarId);
+  vehicle.configure(getActivePhysicsConfig());
+  vehiclePhysics = vehicle;
+  resetDriftBoost(true);
+  replaceWheelMeshes();
+  replaceCarMesh();
+  applyVehicleTuning();
+  updateWheelStyle();
+  updateSelectedCarUi();
+  sendMultiplayerProfile();
+  return isCarUnlocked(selectedCarId);
 }
 
 function selectCourse(courseId) {
@@ -6905,7 +7178,12 @@ function updateSelectedCarUi() {
   }
 
   for (const option of garageOptions) {
-    option.classList.toggle("is-selected", option.dataset.carId === selectedCarId);
+    const carId = option.dataset.carId;
+    const locked = !isCarUnlocked(carId);
+    option.disabled = locked;
+    option.classList.toggle("is-selected", carId === selectedCarId);
+    option.classList.toggle("is-locked", locked);
+    option.setAttribute("aria-disabled", String(locked));
   }
 }
 
@@ -7416,7 +7694,7 @@ function handleVehicleLanding(airborneTime, fallSpeed) {
   vehicleDynamics.landingImpact = Math.max(vehicleDynamics.landingImpact, impact);
 
   const now = performance.now();
-  if (impact > 4.4 && now - lastLandingSparkAt > 90) {
+  if (impact > 3.8 && now - lastLandingSparkAt > 55) {
     emitLandingSparks(impact, airborneTime, groundNormal);
     lastLandingSparkAt = now;
   }
@@ -8255,9 +8533,9 @@ function emitLandingSparks(impact, airborneTime, groundNormal) {
     ))
     : [new THREE.Vector3(chassisBody.position.x, getTrackElevation(chassisBody.position.x, chassisBody.position.z), chassisBody.position.z)];
   const sparksPerPoint = THREE.MathUtils.clamp(
-    Math.floor(impact * 0.48 + airborneTime * 7),
-    3,
-    9,
+    Math.floor(impact * 0.9 + airborneTime * 12),
+    6,
+    18,
   );
 
   for (const point of points) {
@@ -8278,21 +8556,21 @@ function emitLandingSparks(impact, airborneTime, groundNormal) {
       spark.position.copy(point);
       spark.position.addScaledVector(normalVector, 0.09 + Math.random() * 0.12);
       spark.position.addScaledVector(right, sideSpread * 0.18);
-      spark.scale.setScalar(0.9 + Math.random() * 1.9);
-      spark.userData.life = 0.2 + Math.random() * 0.18;
+      spark.scale.setScalar(1.05 + Math.random() * 2.35);
+      spark.userData.life = 0.24 + Math.random() * 0.26;
       spark.userData.maxLife = spark.userData.life;
       spark.userData.velocity = forward
         .clone()
-        .multiplyScalar(rearSpray * THREE.MathUtils.clamp(impact, 4, 18) * 0.18)
-        .addScaledVector(right, sideSpread * (1.2 + Math.random() * 2.8))
-        .addScaledVector(normalVector, 1.2 + Math.random() * 2.2);
-      spark.userData.velocity.y += 0.2 + Math.random() * 0.9;
+        .multiplyScalar(rearSpray * THREE.MathUtils.clamp(impact, 4, 22) * 0.24)
+        .addScaledVector(right, sideSpread * (1.8 + Math.random() * 3.8))
+        .addScaledVector(normalVector, 1.7 + Math.random() * 3.2);
+      spark.userData.velocity.y += 0.35 + Math.random() * 1.25;
       wallSparkParticles.push(spark);
       scene.add(spark);
     }
   }
 
-  trimEffectArray(wallSparkParticles, 260);
+  trimEffectArray(wallSparkParticles, 420);
 }
 
 function updateWallSparks(delta) {
@@ -8920,6 +9198,7 @@ function finishRace(finishTime) {
   message.classList.add("is-visible");
 
   const savedRecord = saveLeaderboardRecord(finishTime);
+  processQuestRaceFinish(finishTime);
   rememberRaceResult(createLocalRaceResult(finishTime));
   submitRaceFinish(finishTime);
   showResultsOverlay(finishTime, savedRecord);
