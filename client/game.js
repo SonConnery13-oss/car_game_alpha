@@ -229,6 +229,7 @@ const CAR_MODELS = {
 };
 const DRIFT_BOOST_CAR_IDS = new Set(["ae86", "rx7fd", "rx7fc"]);
 const DEFAULT_UNLOCKED_CARS = ["gt3"];
+const QUEST_GUEST_KEY = "__guest__";
 const TOUGE_COURSE_IDS = new Set(["map1", "map2", "map3", "akagi", "sadamine", "tsukuba"]);
 const F1_COURSE_IDS = new Set(["monaco", "spa"]);
 const TOUGE_REWARD_CAR_IDS = ["ae86", "rx7fd", "rx7fc"];
@@ -239,7 +240,7 @@ const QUEST_DEFS = [
     title: "Unlock AMG GT Track",
     category: "F1 Track",
     targetTime: 10 * 60 * 1000,
-    description: "Finish Monaco or Spa within 10:00, then claim this reward here.",
+    description: "Finish Monaco or Spa within 10:00, then get this reward here.",
   },
   {
     id: "unlock-ae86",
@@ -271,7 +272,7 @@ const QUEST_DEFS = [
     title: "Unlock Formula RB22",
     category: "F1 Track",
     targetTime: 8 * 60 * 1000,
-    description: "Finish Monaco or Spa within 8:00, then claim this reward here.",
+    description: "Finish Monaco or Spa within 8:00, then get this reward here.",
   },
 ];
 const DRIFT_BOOST_CHARGE_MIN = 0.015;
@@ -5936,10 +5937,13 @@ function createDefaultQuestProfile() {
   };
 }
 
-function getQuestProfile(playerKey = currentPlayer?.key) {
-  const profile = currentPlayer && playerKey
-    ? (getQuestStore()[playerKey] ?? createDefaultQuestProfile())
-    : createDefaultQuestProfile();
+function getQuestProfileKey(playerKey = currentPlayer?.key) {
+  return playerKey || QUEST_GUEST_KEY;
+}
+
+function getQuestProfile(playerKey = getQuestProfileKey()) {
+  const key = getQuestProfileKey(playerKey);
+  const profile = getQuestStore()[key] ?? createDefaultQuestProfile();
   const unlockedCars = Array.isArray(profile.unlockedCars) ? profile.unlockedCars : DEFAULT_UNLOCKED_CARS;
   const pendingRewards = profile.pendingRewards && typeof profile.pendingRewards === "object" ? profile.pendingRewards : {};
   const bestRuns = profile.bestRuns && typeof profile.bestRuns === "object" ? profile.bestRuns : {};
@@ -5950,10 +5954,10 @@ function getQuestProfile(playerKey = currentPlayer?.key) {
   };
 }
 
-function saveQuestProfile(profile, playerKey = currentPlayer?.key) {
-  if (!currentPlayer || !playerKey) return;
+function saveQuestProfile(profile, playerKey = getQuestProfileKey()) {
+  const key = getQuestProfileKey(playerKey);
   const store = getQuestStore();
-  store[playerKey] = {
+  store[key] = {
     unlockedCars: [...new Set([...DEFAULT_UNLOCKED_CARS, ...(profile.unlockedCars ?? [])])],
     pendingRewards: profile.pendingRewards ?? {},
     bestRuns: profile.bestRuns ?? {},
@@ -5964,6 +5968,11 @@ function saveQuestProfile(profile, playerKey = currentPlayer?.key) {
 function isCarUnlocked(carId) {
   if (!CAR_MODELS[carId]) return false;
   return getQuestProfile().unlockedCars.includes(carId);
+}
+
+function hasPendingQuestReward(carId) {
+  if (!CAR_MODELS[carId]) return false;
+  return Boolean(getQuestProfile().pendingRewards[carId]);
 }
 
 function unlockCarInProfile(profile, carId) {
@@ -5985,8 +5994,6 @@ function queueQuestReward(profile, carId, questId, finishTime) {
 }
 
 function processQuestRaceFinish(finishTime) {
-  if (!currentPlayer) return [];
-
   const profile = getQuestProfile();
   const awarded = [];
   const bestKey = F1_COURSE_IDS.has(selectedCourseId) ? "f1" : TOUGE_COURSE_IDS.has(selectedCourseId) ? "touge" : null;
@@ -6033,31 +6040,21 @@ function handleQuestScroll() {
 }
 
 function claimQuestReward(carId) {
-  if (!currentPlayer || !CAR_MODELS[carId]) return;
+  if (!CAR_MODELS[carId]) return false;
   const profile = getQuestProfile();
-  if (!profile.pendingRewards[carId]) return;
+  if (!profile.pendingRewards[carId]) return false;
   delete profile.pendingRewards[carId];
   unlockCarInProfile(profile, carId);
   saveQuestProfile(profile);
   updateSelectedCarUi();
   renderQuestScreen();
   flashMessage(`${CAR_MODELS[carId].name} UNLOCKED`);
+  return true;
 }
 
 function renderQuestScreen() {
   if (!questList) return;
   questList.replaceChildren();
-
-  if (!currentPlayer) {
-    const empty = document.createElement("article");
-    empty.className = "quest-item";
-    empty.append(
-      createTextElement("strong", "Login required"),
-      createTextElement("span", "Log in or sign up to save quest rewards and unlock cars."),
-    );
-    questList.append(empty);
-    return;
-  }
 
   const profile = getQuestProfile();
   for (const quest of QUEST_DEFS) {
@@ -6081,7 +6078,7 @@ function renderQuestScreen() {
     action.type = "button";
     action.dataset.claimCarId = quest.rewardCarId;
     action.disabled = unlocked || !pending;
-    action.textContent = unlocked ? "Claimed" : pending ? "Claim Reward" : "In Progress";
+    action.textContent = unlocked ? "Owned" : pending ? "Get Car" : "Locked";
 
     const details = document.createElement("div");
     details.className = "quest-details";
@@ -7092,7 +7089,11 @@ async function startPreRaceSequence({ startAt = null } = {}) {
 function selectCar(carId) {
   if (!CAR_MODELS[carId]) return;
   if (!isCarUnlocked(carId)) {
-    flashMessage("QUEST LOCKED");
+    if (hasPendingQuestReward(carId) && claimQuestReward(carId)) {
+      selectCar(carId);
+      return;
+    }
+    flashMessage("QUEST REQUIRED");
     showMenuScreen("quest");
     return;
   }
@@ -7180,11 +7181,28 @@ function updateSelectedCarUi() {
   for (const option of garageOptions) {
     const carId = option.dataset.carId;
     const locked = !isCarUnlocked(carId);
-    option.disabled = locked;
+    const pending = hasPendingQuestReward(carId);
+    option.disabled = false;
     option.classList.toggle("is-selected", carId === selectedCarId);
     option.classList.toggle("is-locked", locked);
+    option.classList.toggle("is-reward-ready", locked && pending);
     option.setAttribute("aria-disabled", String(locked));
+    syncGarageObtainButton(option, locked, pending);
   }
+}
+
+function syncGarageObtainButton(option, locked, pending) {
+  let button = option.querySelector(".garage-obtain-button");
+  if (!locked) {
+    button?.remove();
+    return;
+  }
+  if (!button) {
+    button = document.createElement("span");
+    button.className = "garage-obtain-button";
+    option.append(button);
+  }
+  button.textContent = pending ? "Get" : "Quest";
 }
 
 function updateSelectedCourseUi() {
