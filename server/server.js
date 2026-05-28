@@ -65,21 +65,23 @@ io.on("connection", (socket) => {
       lastSeenAt: Date.now(),
     });
 
+    const race = getRaceSession(roomId, player.courseId);
+    const waitingForRaceEnd = isPlayerWaitingForRaceEnd(room.get(socket.id));
+
     socket.emit("multiplayer:joined", {
       selfId: socket.id,
       roomId,
-      players: getCoursePlayers(roomId, player.courseId).map(serializePlayer),
+      players: waitingForRaceEnd ? [] : getCoursePlayers(roomId, player.courseId).map(serializePlayer),
       leaderboard: serializeLeaderboard(),
-      race: serializeRaceSession(getRaceSession(roomId, player.courseId), socket.id),
+      race: waitingForRaceEnd ? null : serializeRaceSession(race, socket.id),
+      waitingForRaceEnd,
     });
-    emitToCourse(roomId, player.courseId, "multiplayer:playerJoined", serializePlayer(room.get(socket.id)), socket.id);
-    broadcastRoomsSnapshot();
-
-    const race = getRaceSession(roomId, player.courseId);
-    if (isRaceActive(race) && !race.participants.has(socket.id)) {
-      race.spectators.add(socket.id);
-      socket.emit("race:spectate", serializeRaceSession(race, socket.id));
+    if (waitingForRaceEnd) {
+      socket.emit("race:waiting", { roomId, courseId: player.courseId });
+    } else {
+      emitToCourse(roomId, player.courseId, "multiplayer:playerJoined", serializePlayer(room.get(socket.id)), socket.id);
     }
+    broadcastRoomsSnapshot();
   });
 
   socket.on("multiplayer:updateProfile", (payload = {}) => {
@@ -93,7 +95,17 @@ io.on("connection", (socket) => {
 
     if (previousCourseId !== player.courseId) {
       emitToCourse(player.roomId, previousCourseId, "multiplayer:playerLeft", { id: socket.id }, socket.id);
-      emitToCourse(player.roomId, player.courseId, "multiplayer:playerJoined", serializePlayer(player), socket.id);
+      if (isPlayerWaitingForRaceEnd(player)) {
+        socket.emit("race:waiting", { roomId: player.roomId, courseId: player.courseId });
+      } else {
+        emitToCourse(player.roomId, player.courseId, "multiplayer:playerJoined", serializePlayer(player), socket.id);
+      }
+      broadcastRoomsSnapshot();
+      return;
+    }
+
+    if (isPlayerWaitingForRaceEnd(player)) {
+      socket.emit("race:waiting", { roomId: player.roomId, courseId: player.courseId });
       broadcastRoomsSnapshot();
       return;
     }
@@ -108,6 +120,8 @@ io.on("connection", (socket) => {
 
     player.state = normalizeState(payload);
     player.lastSeenAt = Date.now();
+    if (isPlayerWaitingForRaceEnd(player)) return;
+
     emitToCourse(player.roomId, player.courseId, "multiplayer:state", {
       id: socket.id,
       displayName: player.displayName,
@@ -133,8 +147,7 @@ io.on("connection", (socket) => {
 
     const existingRace = getRaceSession(player.roomId, player.courseId);
     if (isRaceActive(existingRace)) {
-      existingRace.spectators.add(socket.id);
-      socket.emit("race:spectate", serializeRaceSession(existingRace, socket.id));
+      socket.emit("race:waiting", { roomId: player.roomId, courseId: player.courseId });
       return;
     }
 
@@ -283,6 +296,13 @@ function isRaceActive(race) {
   return Boolean(race && (race.status === "countdown" || race.status === "racing"));
 }
 
+function isPlayerWaitingForRaceEnd(player) {
+  if (!player) return false;
+
+  const race = getRaceSession(player.roomId, player.courseId);
+  return isRaceActive(race) && !race.participants.has(player.id);
+}
+
 function createRaceSession(roomId, courseId, players) {
   const startAt = Date.now() + RACE_COUNTDOWN_MS;
   const race = {
@@ -424,6 +444,19 @@ function completeRace(race) {
   clearRaceTimers(race);
   raceSessions.delete(getRaceKey(race.roomId, race.courseId));
   emitToRaceMembers(race, "race:completed", serializeRaceSession(race));
+  releaseRaceWaiters(race);
+}
+
+function releaseRaceWaiters(race) {
+  for (const player of getCoursePlayers(race.roomId, race.courseId)) {
+    if (race.participants.has(player.id)) continue;
+
+    io.to(player.id).emit("race:waitingComplete", {
+      roomId: race.roomId,
+      courseId: race.courseId,
+    });
+    emitToCourse(race.roomId, race.courseId, "multiplayer:playerJoined", serializePlayer(player), player.id);
+  }
 }
 
 function clearRaceTimers(race) {

@@ -106,6 +106,7 @@ const STORAGE_KEYS = {
   leaderboard: "racing.leaderboard.v1",
   quests: "racing.quests.v1",
   room: "racing.room.v1",
+  pendingOnlineJoin: "racing.pendingOnlineJoin.v1",
 };
 const DEFAULT_ROAD_WIDTH = 14;
 const DEFAULT_LOOP_LAPS = 3;
@@ -569,6 +570,7 @@ let currentPlayer = null;
 let sharedLeaderboard = {};
 let questScrollTimeout = null;
 let pendingOnlineJoinRoomId = null;
+let pendingOnlineJoinCourseId = selectedCourseId;
 
 setupLighting();
 createWorld();
@@ -6153,6 +6155,7 @@ function initializeMultiplayer() {
     multiplayer.selfId = multiplayer.socket.id;
     updateMultiplayerRoomStatus();
     requestRoomList();
+    resumePendingOnlineJoin();
   });
 
   multiplayer.socket.on("disconnect", () => {
@@ -6173,6 +6176,8 @@ function initializeMultiplayer() {
   multiplayer.socket.on("race:countdown", handleRaceCountdown);
   multiplayer.socket.on("race:started", handleRaceStarted);
   multiplayer.socket.on("race:spectate", handleRaceSpectate);
+  multiplayer.socket.on("race:waiting", handleRaceWaiting);
+  multiplayer.socket.on("race:waitingComplete", handleRaceWaitingComplete);
   multiplayer.socket.on("race:finished", handleRaceFinished);
   multiplayer.socket.on("race:completed", handleRaceCompleted);
   multiplayer.socket.on("race:lineup", handleRaceLineup);
@@ -6219,7 +6224,8 @@ function handleMultiplayerJoined(payload = {}) {
   multiplayer.joined = true;
   clearRemotePlayers();
 
-  for (const player of payload.players ?? []) {
+  const players = Array.isArray(payload.players) ? payload.players : [];
+  for (const player of players) {
     createOrUpdateRemotePlayer(player);
   }
 
@@ -6235,7 +6241,8 @@ function handleMultiplayerJoined(payload = {}) {
     resetRaceSession();
   }
 
-  updateMultiplayerRoomStatus(payload.players?.length ?? remotePlayers.size + 1);
+  const joinedPlayerCount = players.length + (players.some((player) => player.id === multiplayer.selfId) ? 0 : 1);
+  updateMultiplayerRoomStatus(joinedPlayerCount);
   sendMultiplayerState(true);
 
   if (multiplayer.pendingStartAfterJoin) {
@@ -6486,6 +6493,22 @@ function handleRaceSpectate(payload = {}) {
   enterSpectatorMode();
 }
 
+function handleRaceWaiting(payload = {}) {
+  if (payload.courseId && payload.courseId !== selectedCourseId) return;
+
+  resetRaceSession();
+  flashMessage("WAIT FOR FINISH");
+}
+
+function handleRaceWaitingComplete(payload = {}) {
+  if (payload.courseId && payload.courseId !== selectedCourseId) return;
+
+  resetRaceSession();
+  sendMultiplayerState(true);
+  requestRoomList();
+  flashMessage("ROOM READY");
+}
+
 function handleRaceFinished(payload = {}) {
   if (payload.courseId && payload.courseId !== selectedCourseId) return;
 
@@ -6597,6 +6620,10 @@ function getSelfRaceParticipant() {
   return raceSession.participants.find((participant) => participant.id === multiplayer.selfId) ?? null;
 }
 
+function isRaceParticipantId(id) {
+  return raceSession.participants.some((participant) => participant.id === id);
+}
+
 function isRacePayloadForCurrentCourse(payload = {}) {
   return Boolean(payload && payload.courseId === selectedCourseId);
 }
@@ -6638,6 +6665,11 @@ function createOrUpdateRemotePlayer(player = {}) {
   if (!player.id || player.id === multiplayer.selfId) return;
 
   if (player.courseId && player.courseId !== selectedCourseId) {
+    removeRemotePlayer(player.id);
+    return;
+  }
+
+  if (isActiveRaceSession() && !isRaceParticipantId(player.id)) {
     removeRemotePlayer(player.id);
     return;
   }
@@ -6691,6 +6723,11 @@ function handleRemotePlayerState(payload = {}) {
 
   const payloadCourseId = payload.courseId ?? payload.state?.courseId;
   if (payloadCourseId !== selectedCourseId) {
+    removeRemotePlayer(payload.id);
+    return;
+  }
+
+  if (isActiveRaceSession() && !isRaceParticipantId(payload.id)) {
     removeRemotePlayer(payload.id);
     return;
   }
@@ -7066,6 +7103,7 @@ function renderOnlineRooms() {
     joinButton.className = "menu-button";
     joinButton.type = "button";
     joinButton.dataset.joinRoomId = room.roomId;
+    joinButton.dataset.joinCourseId = room.courseId ?? DEFAULT_COURSE_ID;
     joinButton.textContent = room.roomId === multiplayer.roomId && multiplayer.joined ? "Joined" : "Join";
     item.append(joinButton);
     onlineRoomList.append(item);
@@ -7075,11 +7113,12 @@ function renderOnlineRooms() {
 function handleOnlineRoomListClick(event) {
   const button = event.target.closest("[data-join-room-id]");
   if (!button) return;
-  openOnlineVehiclePicker(button.dataset.joinRoomId);
+  openOnlineVehiclePicker(button.dataset.joinRoomId, button.dataset.joinCourseId);
 }
 
-function openOnlineVehiclePicker(roomId) {
+function openOnlineVehiclePicker(roomId, courseId = selectedCourseId) {
   pendingOnlineJoinRoomId = sanitizeRoomId(roomId);
+  pendingOnlineJoinCourseId = normalizeCourseId(courseId) ?? selectedCourseId;
   renderOnlineVehiclePicker();
   showMenuScreen("onlineVehicle");
 }
@@ -7123,7 +7162,54 @@ function joinSelectedOnlineRoom() {
     flashMessage("ONLINE OFFLINE");
     return;
   }
-  joinMultiplayerRoom(pendingOnlineJoinRoomId ?? getEnteredRoomId());
+
+  const targetRoomId = pendingOnlineJoinRoomId ?? getEnteredRoomId();
+  const targetCourseId = pendingOnlineJoinCourseId ?? selectedCourseId;
+  if (targetCourseId !== selectedCourseId) {
+    sessionStorage.setItem(
+      STORAGE_KEYS.pendingOnlineJoin,
+      JSON.stringify({ roomId: targetRoomId, courseId: targetCourseId, carId: selectedCarId }),
+    );
+    sessionStorage.setItem("racing.returnScreen", "setup");
+    const url = new URL(window.location.href);
+    url.searchParams.set("track", targetCourseId);
+    url.searchParams.set("car", selectedCarId);
+    url.searchParams.set("room", targetRoomId);
+    window.location.href = url.toString();
+    return;
+  }
+
+  joinMultiplayerRoom(targetRoomId);
+  showMenuScreen("setup");
+  flashMessage("ROOM JOINED");
+}
+
+function resumePendingOnlineJoin() {
+  let pending = null;
+  try {
+    pending = JSON.parse(sessionStorage.getItem(STORAGE_KEYS.pendingOnlineJoin) || "null");
+  } catch {
+    pending = null;
+  }
+
+  if (!pending) return;
+
+  const roomId = sanitizeRoomId(pending.roomId);
+  const courseId = normalizeCourseId(pending.courseId);
+  if (!roomId || !courseId) {
+    sessionStorage.removeItem(STORAGE_KEYS.pendingOnlineJoin);
+    return;
+  }
+
+  if (courseId !== selectedCourseId) return;
+
+  const carId = CAR_MODELS[pending.carId] && isCarUnlocked(pending.carId) ? pending.carId : selectedCarId;
+  if (carId !== selectedCarId) selectCar(carId);
+
+  sessionStorage.removeItem(STORAGE_KEYS.pendingOnlineJoin);
+  pendingOnlineJoinRoomId = roomId;
+  pendingOnlineJoinCourseId = courseId;
+  joinMultiplayerRoom(roomId);
   showMenuScreen("setup");
   flashMessage("ROOM JOINED");
 }
@@ -9420,15 +9506,15 @@ function updateCamera(delta) {
   cameraRig.shakeIntensity = THREE.MathUtils.lerp(
     cameraRig.shakeIntensity,
     shakeTarget,
-    1 - Math.exp(-7.5 * delta),
+    1 - Math.exp(-9.5 * delta),
   );
   if (cameraRig.shakeIntensity > 0.001) {
     const time = performance.now() * 0.001;
     const shake = cameraRig.shakeIntensity;
-    desiredPosition.addScaledVector(cameraRight, (Math.sin(time * 8.2) + Math.sin(time * 13.7) * 0.42) * shake);
-    desiredPosition.y += (Math.sin(time * 10.6) + Math.cos(time * 6.4) * 0.34) * shake * 0.42;
-    lookTarget.addScaledVector(cameraRight, Math.cos(time * 7.1) * shake * 0.42);
-    lookTarget.y += Math.sin(time * 5.8) * shake * 0.18;
+    desiredPosition.addScaledVector(cameraRight, (Math.sin(time * 8.2) + Math.sin(time * 13.7) * 0.52) * shake * 1.35);
+    desiredPosition.y += (Math.sin(time * 10.6) + Math.cos(time * 6.4) * 0.4) * shake * 0.72;
+    lookTarget.addScaledVector(cameraRight, Math.cos(time * 7.1) * shake * 0.78);
+    lookTarget.y += Math.sin(time * 5.8) * shake * 0.36;
   }
 
   const positionBlend = 1 - Math.exp(-(cameraMode === 0 ? 6.4 + speedFactor * 4.8 : 9.5) * delta);
@@ -9446,11 +9532,11 @@ function getCameraShakeTarget(speedFactor) {
   const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
   const speedShake = smoothstep(4, 36, speedAbs);
   const brakeShake = vehicleDynamics.braking
-    ? THREE.MathUtils.clamp((vehiclePhysics.brake ?? 0) * speedShake, 0, 1) * 0.055
+    ? THREE.MathUtils.clamp((vehiclePhysics.brake ?? 0) * speedShake, 0, 1) * 0.12
     : 0;
-  const driftShake = THREE.MathUtils.clamp((vehicleDynamics.driftFactor ?? driftAmount) * speedFactor, 0, 1) * 0.095;
-  const handbrakeShake = vehicleDynamics.handbrake ? driftShake * 0.36 : 0;
-  return Math.min(0.13, brakeShake + driftShake + handbrakeShake);
+  const driftShake = THREE.MathUtils.clamp((vehicleDynamics.driftFactor ?? driftAmount) * speedFactor, 0, 1) * 0.19;
+  const handbrakeShake = vehicleDynamics.handbrake ? driftShake * 0.5 : 0;
+  return Math.min(0.28, brakeShake + driftShake + handbrakeShake);
 }
 
 function getCameraSubject() {
