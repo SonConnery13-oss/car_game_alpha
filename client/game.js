@@ -39,7 +39,6 @@ const helpButton = document.querySelector("#helpButton");
 const setupBackButton = document.querySelector("#setupBackButton");
 const setupGarageButton = document.querySelector("#setupGarageButton");
 const setupMapButton = document.querySelector("#setupMapButton");
-const setupOnlineRoomsButton = document.querySelector("#setupOnlineRoomsButton");
 const setupNextButton = document.querySelector("#setupNextButton");
 const modeBackButton = document.querySelector("#modeBackButton");
 const offlineModeButton = document.querySelector("#offlineModeButton");
@@ -99,11 +98,6 @@ const resultsTime = document.querySelector("#resultsTime");
 const leaderboardBody = document.querySelector("#leaderboardBody");
 const resultMenuButton = document.querySelector("#resultMenuButton");
 const resultRetryButton = document.querySelector("#resultRetryButton");
-const raceInvitePrompt = document.querySelector("#raceInvitePrompt");
-const raceInviteTitle = document.querySelector("#raceInviteTitle");
-const raceInviteDetails = document.querySelector("#raceInviteDetails");
-const raceInviteAcceptButton = document.querySelector("#raceInviteAcceptButton");
-const raceInviteDeclineButton = document.querySelector("#raceInviteDeclineButton");
 const URL_PARAMS = new URLSearchParams(window.location.search);
 
 const STORAGE_KEYS = {
@@ -112,7 +106,6 @@ const STORAGE_KEYS = {
   leaderboard: "racing.leaderboard.v1",
   quests: "racing.quests.v1",
   room: "racing.room.v1",
-  pendingInvite: "racing.pendingInvite.v1",
 };
 const DEFAULT_ROAD_WIDTH = 14;
 const DEFAULT_LOOP_LAPS = 3;
@@ -476,6 +469,7 @@ const vehicleDynamics = {
   lastForward: new CANNON.Vec3(0, 0, 1),
   lastRight: new CANNON.Vec3(1, 0, 0),
   surfaceGrip: 1,
+  upsideDownTime: 0,
 };
 const visualSuspension = {
   heave: 0,
@@ -492,6 +486,7 @@ const cameraRig = {
   focus: new THREE.Vector3(),
   lookTarget: new THREE.Vector3(),
   forward: new THREE.Vector3(0, 0, 1),
+  shakeIntensity: 0,
 };
 const cameraOrbit = {
   active: false,
@@ -541,7 +536,6 @@ const multiplayer = {
   joined: false,
   lastSentAt: 0,
   pendingStartAfterJoin: false,
-  pendingInviteResponse: null,
   rooms: [],
 };
 const raceSession = {
@@ -574,7 +568,6 @@ let raceFinished = false;
 let currentPlayer = null;
 let sharedLeaderboard = {};
 let questScrollTimeout = null;
-let pendingRaceInvite = null;
 let pendingOnlineJoinRoomId = null;
 
 setupLighting();
@@ -6160,12 +6153,6 @@ function initializeMultiplayer() {
     multiplayer.selfId = multiplayer.socket.id;
     updateMultiplayerRoomStatus();
     requestRoomList();
-    const pendingInvite = loadStoredJson(STORAGE_KEYS.pendingInvite, null);
-    if (pendingInvite?.inviteId && pendingInvite?.roomId) {
-      joinMultiplayerRoom(pendingInvite.roomId, true, {
-        pendingInviteResponse: { inviteId: pendingInvite.inviteId, accepted: true },
-      });
-    }
   });
 
   multiplayer.socket.on("disconnect", () => {
@@ -6189,9 +6176,6 @@ function initializeMultiplayer() {
   multiplayer.socket.on("race:finished", handleRaceFinished);
   multiplayer.socket.on("race:completed", handleRaceCompleted);
   multiplayer.socket.on("race:lineup", handleRaceLineup);
-  multiplayer.socket.on("race:invite", handleRaceInvite);
-  multiplayer.socket.on("race:inviteWaiting", handleRaceInviteWaiting);
-  multiplayer.socket.on("race:inviteExpired", handleRaceInviteExpired);
   multiplayer.socket.on("rooms:snapshot", handleRoomsSnapshot);
 }
 
@@ -6199,7 +6183,6 @@ function joinMultiplayerRoom(roomId = "lobby", isReconnect = false, options = {}
   const safeRoomId = sanitizeRoomId(roomId);
   multiplayer.roomId = safeRoomId;
   multiplayer.pendingStartAfterJoin = Boolean(options.startAfterJoin);
-  multiplayer.pendingInviteResponse = options.pendingInviteResponse ?? multiplayer.pendingInviteResponse;
   localStorage.setItem(STORAGE_KEYS.room, safeRoomId);
   syncRoomUrl(safeRoomId);
   if (roomIdInput) roomIdInput.value = safeRoomId;
@@ -6221,7 +6204,6 @@ function joinMultiplayerRoom(roomId = "lobby", isReconnect = false, options = {}
 
 function leaveMultiplayerRoom() {
   multiplayer.pendingStartAfterJoin = false;
-  multiplayer.pendingInviteResponse = null;
   if (multiplayer.socket?.connected && multiplayer.joined) {
     multiplayer.socket.emit("multiplayer:leaveRoom");
   }
@@ -6255,13 +6237,6 @@ function handleMultiplayerJoined(payload = {}) {
 
   updateMultiplayerRoomStatus(payload.players?.length ?? remotePlayers.size + 1);
   sendMultiplayerState(true);
-
-  if (multiplayer.pendingInviteResponse) {
-    const response = multiplayer.pendingInviteResponse;
-    multiplayer.pendingInviteResponse = null;
-    localStorage.removeItem(STORAGE_KEYS.pendingInvite);
-    sendRaceInviteResponse(response.inviteId, response.accepted);
-  }
 
   if (multiplayer.pendingStartAfterJoin) {
     multiplayer.pendingStartAfterJoin = false;
@@ -6413,6 +6388,7 @@ function requestRaceStart() {
 function startLocalRace() {
   setupRaceScreen();
   resetRaceSession();
+  raceSession.mode = "offline";
   resetRaceProgress();
   resetCar(0, 1);
   startPreRaceSequence();
@@ -6422,7 +6398,6 @@ function setupRaceScreen({ keepResults = false } = {}) {
   blurActiveUiControl();
   cancelRaceCountdown();
   if (!keepResults) hideResultsOverlay();
-  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
   raceFinished = false;
   menuActive = false;
   mainMenu?.classList.add("is-hidden");
@@ -6481,8 +6456,6 @@ function handleRaceSnapshot(payload = {}) {
 function handleRaceCountdown(payload = {}) {
   if (!isRacePayloadForCurrentCourse(payload)) return;
 
-  pendingRaceInvite = null;
-  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
   updateRaceSession(payload);
   const participant = getSelfRaceParticipant();
   if (!participant) {
@@ -6987,7 +6960,6 @@ function setupMenu() {
   setupBackButton?.addEventListener("click", showMainMenu);
   setupGarageButton?.addEventListener("click", () => showMenuScreen("garage"));
   setupMapButton?.addEventListener("click", () => showMenuScreen("map"));
-  setupOnlineRoomsButton?.addEventListener("click", () => showMenuScreen("online"));
   setupNextButton?.addEventListener("click", () => showMenuScreen("mode"));
   modeBackButton?.addEventListener("click", () => showMenuScreen("setup"));
   offlineModeButton?.addEventListener("click", startOfflineRace);
@@ -7000,8 +6972,6 @@ function setupMenu() {
   onlineJoinSelectedButton?.addEventListener("click", joinSelectedOnlineRoom);
   onlineRoomList?.addEventListener("click", handleOnlineRoomListClick);
   onlineVehicleList?.addEventListener("click", handleOnlineVehicleListClick);
-  raceInviteAcceptButton?.addEventListener("click", acceptRaceInvite);
-  raceInviteDeclineButton?.addEventListener("click", declineRaceInvite);
   authLoginButton?.addEventListener("click", () => showMenuScreen("login"));
   authSignupButton?.addEventListener("click", () => showMenuScreen("signup"));
   loginToSignupButton?.addEventListener("click", () => showMenuScreen("signup"));
@@ -7156,76 +7126,6 @@ function joinSelectedOnlineRoom() {
   joinMultiplayerRoom(pendingOnlineJoinRoomId ?? getEnteredRoomId());
   showMenuScreen("setup");
   flashMessage("ROOM JOINED");
-}
-
-function handleRaceInvite(payload = {}) {
-  if (!payload.inviteId || !payload.roomId || !payload.courseId) return;
-  if (!currentPlayer) {
-    sendRaceInviteResponse(payload.inviteId, false);
-    return;
-  }
-
-  pendingRaceInvite = payload;
-  const course = COURSE_DEFS[payload.courseId] ?? COURSE_DEFS[DEFAULT_COURSE_ID];
-  if (raceInviteTitle) raceInviteTitle.textContent = `${payload.hostName ?? "A player"} wants to race`;
-  if (raceInviteDetails) {
-    raceInviteDetails.textContent = `${course.menuLabel ?? course.name} / Room ${payload.roomId}`;
-  }
-  if (raceInvitePrompt) raceInvitePrompt.hidden = false;
-  message.textContent = "RACE INVITE";
-  message.classList.add("is-visible");
-}
-
-function handleRaceInviteWaiting(payload = {}) {
-  message.textContent = payload.inviteCount ? `INVITING ${payload.inviteCount}` : "STARTING";
-  message.classList.add("is-visible");
-}
-
-function handleRaceInviteExpired(payload = {}) {
-  if (pendingRaceInvite?.inviteId === payload.inviteId) pendingRaceInvite = null;
-  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
-}
-
-function acceptRaceInvite() {
-  if (!pendingRaceInvite) return;
-  const invite = pendingRaceInvite;
-  pendingRaceInvite = null;
-  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
-
-  if (selectedCourseId !== invite.courseId) {
-    saveStoredJson(STORAGE_KEYS.pendingInvite, {
-      inviteId: invite.inviteId,
-      roomId: invite.roomId,
-      courseId: invite.courseId,
-    });
-    const url = new URL(window.location.href);
-    url.searchParams.set("track", invite.courseId);
-    url.searchParams.set("car", selectedCarId);
-    url.searchParams.set("room", invite.roomId);
-    window.location.href = url.toString();
-    return;
-  }
-
-  if (!multiplayer.joined || multiplayer.roomId !== invite.roomId) {
-    joinMultiplayerRoom(invite.roomId, false, {
-      pendingInviteResponse: { inviteId: invite.inviteId, accepted: true },
-    });
-    return;
-  }
-
-  sendRaceInviteResponse(invite.inviteId, true);
-}
-
-function declineRaceInvite() {
-  if (!pendingRaceInvite) return;
-  sendRaceInviteResponse(pendingRaceInvite.inviteId, false);
-  pendingRaceInvite = null;
-  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
-}
-
-function sendRaceInviteResponse(inviteId, accepted) {
-  if (!multiplayer.socket?.connected || !inviteId) return;
-  multiplayer.socket.emit("race:inviteResponse", { inviteId, accepted: Boolean(accepted) });
 }
 
 function showMenuScreen(screen) {
@@ -7964,11 +7864,46 @@ function updateControls(delta) {
   vehicle.updatePhysics(delta, drivingInput);
   syncVehicleDynamicsFromPhysics(delta);
   updateDriftBoost(delta, drivingInput);
+  recoverVehicleIfOverturned(delta);
   handleMultiplayerVehicleCollisions();
 
   if (chassisBody.position.y < getFallResetY()) {
     resetCar();
   }
+}
+
+function recoverVehicleIfOverturned(delta) {
+  if (raceFinished || !vehicleDynamics.grounded) {
+    vehicleDynamics.upsideDownTime = 0;
+    return;
+  }
+
+  const carUp = new CANNON.Vec3(0, 1, 0);
+  chassisBody.vectorToWorldFrame(carUp, carUp);
+  const mostlyUpsideDown = carUp.y < -0.25;
+  vehicleDynamics.upsideDownTime = mostlyUpsideDown
+    ? vehicleDynamics.upsideDownTime + delta
+    : 0;
+
+  if (vehicleDynamics.upsideDownTime < 3) return;
+
+  recoverOverturnedVehicle();
+}
+
+function recoverOverturnedVehicle() {
+  const forward = getHorizontalVehicleForward();
+  const yaw = forward.lengthSq() > 0.0001 ? Math.atan2(forward.x, forward.z) : START_YAW;
+  const groundY = getTrackElevation(chassisBody.position.x, chassisBody.position.z);
+  chassisBody.position.y = groundY + 1.15;
+  chassisBody.quaternion.setFromEuler(0, yaw, 0);
+  chassisBody.velocity.set(0, 0, 0);
+  chassisBody.angularVelocity.set(0, 0, 0);
+  chassisBody.force.set(0, 0, 0);
+  chassisBody.torque.set(0, 0, 0);
+  vehicleDynamics.upsideDownTime = 0;
+  vehicleDynamics.airborneTime = 0;
+  vehicleDynamics.airborneFallSpeed = 0;
+  flashMessage("RECOVERED");
 }
 
 function getFallResetY() {
@@ -9471,9 +9406,9 @@ function updateCamera(delta) {
     desiredPosition = target.clone().add(orbitOffset);
     lookTarget = target.clone().add(up.clone().multiplyScalar(0.3));
   } else if (cameraMode === 0) {
-    const distance = THREE.MathUtils.lerp(8.4, 7.1, speedFactor) + (tuning.cameraDistanceOffset ?? 0);
-    const height = THREE.MathUtils.lerp(4.25, 5.25, speedFactor) + (tuning.cameraHeightOffset ?? 0);
-    const lookAhead = THREE.MathUtils.lerp(10.5, 16.5, speedFactor) + (tuning.cameraLookAheadOffset ?? 0);
+    const distance = THREE.MathUtils.lerp(7.9, 6.75, speedFactor) + (tuning.cameraDistanceOffset ?? 0) * 0.65;
+    const height = THREE.MathUtils.lerp(4.05, 4.86, speedFactor) + (tuning.cameraHeightOffset ?? 0) * 0.72;
+    const lookAhead = THREE.MathUtils.lerp(9.2, 13.4, speedFactor) + (tuning.cameraLookAheadOffset ?? 0) * 0.66;
     desiredPosition = target.clone().addScaledVector(cameraRig.forward, -distance).add(up.clone().multiplyScalar(height));
     lookTarget = target.clone().addScaledVector(cameraRig.forward, lookAhead).add(up.clone().multiplyScalar(0.15));
   } else {
@@ -9481,12 +9416,19 @@ function updateCamera(delta) {
     lookTarget = target.clone().addScaledVector(cameraRig.forward, 18).add(up.clone().multiplyScalar(0.08));
   }
 
-  const driftShake = cameraSubject.isLocal ? getHandbrakeCameraShake(speedFactor) : 0;
-  if (driftShake > 0) {
+  const shakeTarget = cameraSubject.isLocal ? getCameraShakeTarget(speedFactor) : 0;
+  cameraRig.shakeIntensity = THREE.MathUtils.lerp(
+    cameraRig.shakeIntensity,
+    shakeTarget,
+    1 - Math.exp(-7.5 * delta),
+  );
+  if (cameraRig.shakeIntensity > 0.001) {
     const time = performance.now() * 0.001;
-    desiredPosition.addScaledVector(cameraRight, Math.sin(time * 58) * driftShake);
-    desiredPosition.y += Math.sin(time * 83) * driftShake * 0.46;
-    lookTarget.addScaledVector(cameraRight, Math.cos(time * 47) * driftShake * 0.34);
+    const shake = cameraRig.shakeIntensity;
+    desiredPosition.addScaledVector(cameraRight, (Math.sin(time * 8.2) + Math.sin(time * 13.7) * 0.42) * shake);
+    desiredPosition.y += (Math.sin(time * 10.6) + Math.cos(time * 6.4) * 0.34) * shake * 0.42;
+    lookTarget.addScaledVector(cameraRight, Math.cos(time * 7.1) * shake * 0.42);
+    lookTarget.y += Math.sin(time * 5.8) * shake * 0.18;
   }
 
   const positionBlend = 1 - Math.exp(-(cameraMode === 0 ? 6.4 + speedFactor * 4.8 : 9.5) * delta);
@@ -9498,11 +9440,17 @@ function updateCamera(delta) {
   camera.lookAt(cameraRig.lookTarget);
 }
 
-function getHandbrakeCameraShake(speedFactor) {
-  if (!vehicleDynamics.handbrake || !vehicleDynamics.grounded) return 0;
+function getCameraShakeTarget(speedFactor) {
+  if (!vehicleDynamics.grounded) return 0;
 
-  const driftShake = THREE.MathUtils.clamp(vehicleDynamics.driftFactor * speedFactor, 0, 1);
-  return THREE.MathUtils.lerp(0, 0.13, driftShake);
+  const speedAbs = Math.abs(vehicleDynamics.signedSpeed);
+  const speedShake = smoothstep(4, 36, speedAbs);
+  const brakeShake = vehicleDynamics.braking
+    ? THREE.MathUtils.clamp((vehiclePhysics.brake ?? 0) * speedShake, 0, 1) * 0.055
+    : 0;
+  const driftShake = THREE.MathUtils.clamp((vehicleDynamics.driftFactor ?? driftAmount) * speedFactor, 0, 1) * 0.095;
+  const handbrakeShake = vehicleDynamics.handbrake ? driftShake * 0.36 : 0;
+  return Math.min(0.13, brakeShake + driftShake + handbrakeShake);
 }
 
 function getCameraSubject() {
@@ -9628,6 +9576,8 @@ function getRaceLapTotal() {
 function saveLeaderboardRecord(finishTime) {
   if (!currentPlayer) return null;
 
+  const previousRecords = getCourseLeaderboard(selectedCourseId);
+  const previousRank = getLeaderboardRank(previousRecords, currentPlayer.key);
   const leaderboard = loadStoredJson(STORAGE_KEYS.leaderboard, {});
   const courseRecords = leaderboard[selectedCourseId] ?? {};
   const previous = courseRecords[currentPlayer.key];
@@ -9647,12 +9597,22 @@ function saveLeaderboardRecord(finishTime) {
   }
 
   const bestRecord = courseRecords[currentPlayer.key] ?? record;
+  const currentRecords = getCourseLeaderboard(selectedCourseId);
+  const currentRank = getLeaderboardRank(currentRecords, currentPlayer.key);
   submitLeaderboardRecord(bestRecord, selectedCourseId);
 
   return {
     record: bestRecord,
     isPersonalBest,
+    previousRank,
+    currentRank,
+    rankImproved: Boolean(isPersonalBest && currentRank && (!previousRank || currentRank < previousRank)),
   };
+}
+
+function getLeaderboardRank(records, playerKey) {
+  const index = records.findIndex((record) => record.key === playerKey || record.playerId === playerKey);
+  return index >= 0 ? index + 1 : null;
 }
 
 function getCourseLeaderboard(courseId = selectedCourseId) {
@@ -9678,24 +9638,41 @@ function showResultsOverlay(finishTime, savedRecord) {
   if (!resultsOverlay) return;
 
   resultsOverlay.hidden = false;
-  if (resultsTitle) resultsTitle.textContent = savedRecord?.isPersonalBest ? "New Best" : "Race Complete";
+  resultsOverlay.classList.toggle("is-rank-up", Boolean(savedRecord?.rankImproved));
+  if (resultsTitle) {
+    resultsTitle.textContent = savedRecord?.rankImproved
+      ? `Rank Up #${savedRecord.currentRank}`
+      : savedRecord?.isPersonalBest ? "New Best" : "Race Complete";
+  }
   if (resultsCourse) resultsCourse.textContent = activeCourse.name;
   if (resultsPlayer) resultsPlayer.textContent = currentPlayer?.id ?? "GUEST";
   if (resultsTime) resultsTime.textContent = formatTime(finishTime);
-  renderRaceResults(savedRecord?.record?.key ?? currentPlayer?.key ?? multiplayer.selfId ?? null);
+  renderRaceResults(savedRecord?.record?.key ?? currentPlayer?.key ?? multiplayer.selfId ?? null, savedRecord);
 }
 
 function hideResultsOverlay() {
-  if (resultsOverlay) resultsOverlay.hidden = true;
+  if (resultsOverlay) {
+    resultsOverlay.hidden = true;
+    resultsOverlay.classList.remove("is-rank-up");
+  }
 }
 
-function renderRaceResults(playerKey) {
+function renderRaceResults(playerKey, savedRecord = null) {
   if (!leaderboardBody) return;
 
   leaderboardBody.replaceChildren();
-  const records = raceSession.results.length ? [...raceSession.results].sort(compareRaceResults) : [createLocalRaceResult(0)].filter(
-    (record) => record.time > 0,
-  );
+  const records = raceSession.mode === "offline"
+    ? getCourseLeaderboard(selectedCourseId).map((record) => ({
+        id: record.key,
+        playerId: record.key,
+        displayName: record.id,
+        carId: record.carId,
+        time: record.time,
+        finishedAt: record.finishedAt,
+      }))
+    : raceSession.results.length ? [...raceSession.results].sort(compareRaceResults) : [createLocalRaceResult(0)].filter(
+        (record) => record.time > 0,
+      );
   if (!records.length) {
     const empty = document.createElement("div");
     empty.className = "leaderboard-empty";
@@ -9717,6 +9694,7 @@ function renderRaceResults(playerKey) {
     const row = document.createElement("div");
     row.className = "leaderboard-row";
     row.classList.toggle("is-player", record.playerId === playerKey || record.id === playerKey);
+    row.classList.toggle("is-rank-up", Boolean(savedRecord?.rankImproved) && (record.playerId === playerKey || record.id === playerKey));
 
     const rankCell = document.createElement("span");
     const idCell = document.createElement("span");
@@ -9908,6 +9886,7 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   vehicleDynamics.lastForward.set(0, 0, 1);
   vehicleDynamics.lastRight.set(1, 0, 0);
   vehicleDynamics.surfaceGrip = 1;
+  vehicleDynamics.upsideDownTime = 0;
   visualSuspension.heave = 0;
   visualSuspension.heaveVelocity = 0;
   visualSuspension.pitch = 0;
@@ -9918,6 +9897,7 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
   visualSuspension.contactRatio = 0;
   cameraRig.initialized = false;
   cameraRig.lookTarget.set(0, 0, 0);
+  cameraRig.shakeIntensity = 0;
   carVisualMotion.initialized = false;
   for (const wheelMotion of wheelMeshMotion) {
     wheelMotion.initialized = false;

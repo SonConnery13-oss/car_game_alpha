@@ -11,7 +11,6 @@ const DEFAULT_ROOM_ID = "lobby";
 const LEADERBOARD_FILE = path.join(__dirname, "data", "leaderboard.json");
 const LEADERBOARD_LIMIT = 100;
 const RACE_COUNTDOWN_MS = 3600;
-const RACE_INVITE_TIMEOUT_MS = 12000;
 const RACE_TIMEOUT_MS = 15 * 60 * 1000;
 
 const app = express();
@@ -24,7 +23,6 @@ const io = new Server(server, {
 
 const rooms = new Map();
 const raceSessions = new Map();
-const pendingRaceInvites = new Map();
 const leaderboard = loadLeaderboard();
 
 app.use(express.static(CLIENT_DIR));
@@ -140,11 +138,12 @@ io.on("connection", (socket) => {
       return;
     }
 
-    createRaceInvite(player);
-  });
+    const participants = getCoursePlayers(player.roomId, player.courseId).filter(isRaceEligiblePlayer);
+    if (!participants.length) return;
 
-  socket.on("race:inviteResponse", (payload = {}) => {
-    handleRaceInviteResponse(socket, payload);
+    const race = createRaceSession(player.roomId, player.courseId, participants);
+    setRaceSession(race);
+    emitToRaceMembers(race, "race:countdown", serializeRaceSession(race));
   });
 
   socket.on("race:finish", (payload = {}) => {
@@ -253,111 +252,6 @@ function emitToRaceMembers(race, event, payload) {
 
 function isRaceEligiblePlayer(player) {
   return !/^guest(?:-|$)/i.test(player.playerId);
-}
-
-function createRaceInvite(hostPlayer) {
-  const host = getRoom(hostPlayer.roomId).get(hostPlayer.id);
-  if (!host || !isRaceEligiblePlayer(host)) return;
-
-  const candidates = [...getRoom(host.roomId).values()]
-    .filter((player) => player.id !== host.id && isRaceEligiblePlayer(player));
-
-  if (!candidates.length) {
-    startRaceForPlayers(host, []);
-    return;
-  }
-
-  const invite = {
-    id: `${host.roomId}-${host.courseId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    roomId: host.roomId,
-    courseId: host.courseId,
-    hostId: host.id,
-    hostName: host.displayName,
-    candidates: new Set(candidates.map((player) => player.id)),
-    accepted: new Set(),
-    declined: new Set(),
-    timer: null,
-  };
-  pendingRaceInvites.set(invite.id, invite);
-
-  const timeoutAt = Date.now() + RACE_INVITE_TIMEOUT_MS;
-  for (const player of candidates) {
-    io.to(player.id).emit("race:invite", {
-      inviteId: invite.id,
-      roomId: invite.roomId,
-      courseId: invite.courseId,
-      hostName: invite.hostName,
-      timeoutAt,
-    });
-  }
-  io.to(host.id).emit("race:inviteWaiting", {
-    inviteId: invite.id,
-    inviteCount: candidates.length,
-    timeoutAt,
-  });
-
-  invite.timer = setTimeout(() => finalizeRaceInvite(invite.id), RACE_INVITE_TIMEOUT_MS);
-}
-
-function handleRaceInviteResponse(socket, payload = {}) {
-  const inviteId = String(payload.inviteId ?? "");
-  const invite = pendingRaceInvites.get(inviteId);
-  const player = getSocketPlayer(socket);
-  if (!invite || !player || player.roomId !== invite.roomId || !invite.candidates.has(player.id)) return;
-
-  invite.declined.delete(player.id);
-  invite.accepted.delete(player.id);
-
-  if (payload.accepted) {
-    invite.accepted.add(player.id);
-    if (player.courseId !== invite.courseId) {
-      const previousCourseId = player.courseId;
-      player.courseId = invite.courseId;
-      emitToCourse(player.roomId, previousCourseId, "multiplayer:playerLeft", { id: player.id }, player.id);
-      emitToCourse(player.roomId, player.courseId, "multiplayer:playerJoined", serializePlayer(player), player.id);
-      broadcastRoomsSnapshot();
-    }
-  } else {
-    invite.declined.add(player.id);
-  }
-
-  if (invite.accepted.size + invite.declined.size >= invite.candidates.size) {
-    finalizeRaceInvite(invite.id);
-  }
-}
-
-function finalizeRaceInvite(inviteId) {
-  const invite = pendingRaceInvites.get(inviteId);
-  if (!invite) return;
-
-  pendingRaceInvites.delete(inviteId);
-  if (invite.timer) clearTimeout(invite.timer);
-
-  for (const id of invite.candidates) {
-    io.to(id).emit("race:inviteExpired", { inviteId });
-  }
-
-  const room = rooms.get(invite.roomId);
-  const host = room?.get(invite.hostId);
-  if (!host) return;
-
-  const acceptedPlayers = [...invite.accepted]
-    .map((id) => room.get(id))
-    .filter((player) => player && player.courseId === invite.courseId && isRaceEligiblePlayer(player));
-
-  startRaceForPlayers(host, acceptedPlayers);
-}
-
-function startRaceForPlayers(host, acceptedPlayers) {
-  const existingRace = getRaceSession(host.roomId, host.courseId);
-  if (isRaceActive(existingRace)) return;
-
-  const participants = [host, ...acceptedPlayers].filter(isRaceEligiblePlayer);
-  if (!participants.length) return;
-
-  const race = createRaceSession(host.roomId, host.courseId, participants);
-  setRaceSession(race);
-  emitToRaceMembers(race, "race:countdown", serializeRaceSession(race));
 }
 
 function serializePlayer(player) {
