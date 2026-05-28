@@ -19,6 +19,10 @@ const boostFill = document.querySelector("#boostFill");
 const message = document.querySelector("#message");
 const mainMenu = document.querySelector("#mainMenu");
 const developersScreen = document.querySelector("#developersScreen");
+const setupScreen = document.querySelector("#setupScreen");
+const modeScreen = document.querySelector("#modeScreen");
+const onlineScreen = document.querySelector("#onlineScreen");
+const onlineVehicleScreen = document.querySelector("#onlineVehicleScreen");
 const garageScreen = document.querySelector("#garageScreen");
 const mapScreen = document.querySelector("#mapScreen");
 const questScreen = document.querySelector("#questScreen");
@@ -32,9 +36,29 @@ const questButton = document.querySelector("#questButton");
 const mapButton = document.querySelector("#mapButton");
 const rankingsButton = document.querySelector("#rankingsButton");
 const helpButton = document.querySelector("#helpButton");
+const setupBackButton = document.querySelector("#setupBackButton");
+const setupGarageButton = document.querySelector("#setupGarageButton");
+const setupMapButton = document.querySelector("#setupMapButton");
+const setupOnlineRoomsButton = document.querySelector("#setupOnlineRoomsButton");
+const setupNextButton = document.querySelector("#setupNextButton");
+const modeBackButton = document.querySelector("#modeBackButton");
+const offlineModeButton = document.querySelector("#offlineModeButton");
+const onlineModeButton = document.querySelector("#onlineModeButton");
+const onlineBackButton = document.querySelector("#onlineBackButton");
+const onlineCreateStartButton = document.querySelector("#onlineCreateStartButton");
+const refreshRoomsButton = document.querySelector("#refreshRoomsButton");
+const onlineRoomList = document.querySelector("#onlineRoomList");
+const onlineVehicleBackButton = document.querySelector("#onlineVehicleBackButton");
+const onlineVehicleList = document.querySelector("#onlineVehicleList");
+const onlineJoinSelectedButton = document.querySelector("#onlineJoinSelectedButton");
 const selectedCarName = document.querySelector("#selectedCarName");
 const selectedCarImage = document.querySelector("#selectedCarImage");
 const selectedCarPreviewImage = document.querySelector("#selectedCarPreviewImage");
+const setupCarName = document.querySelector("#setupCarName");
+const setupCarImage = document.querySelector("#setupCarImage");
+const setupCarPreviewImage = document.querySelector("#setupCarPreviewImage");
+const setupCourseName = document.querySelector("#setupCourseName");
+const setupMapCanvas = document.querySelector("#setupMapCanvas");
 const garageOptions = document.querySelectorAll("[data-car-id]");
 const courseOptions = document.querySelectorAll("[data-course-id]");
 const rankingsCourseOptions = document.querySelectorAll("[data-rankings-course-id]");
@@ -75,6 +99,11 @@ const resultsTime = document.querySelector("#resultsTime");
 const leaderboardBody = document.querySelector("#leaderboardBody");
 const resultMenuButton = document.querySelector("#resultMenuButton");
 const resultRetryButton = document.querySelector("#resultRetryButton");
+const raceInvitePrompt = document.querySelector("#raceInvitePrompt");
+const raceInviteTitle = document.querySelector("#raceInviteTitle");
+const raceInviteDetails = document.querySelector("#raceInviteDetails");
+const raceInviteAcceptButton = document.querySelector("#raceInviteAcceptButton");
+const raceInviteDeclineButton = document.querySelector("#raceInviteDeclineButton");
 const URL_PARAMS = new URLSearchParams(window.location.search);
 
 const STORAGE_KEYS = {
@@ -83,6 +112,7 @@ const STORAGE_KEYS = {
   leaderboard: "racing.leaderboard.v1",
   quests: "racing.quests.v1",
   room: "racing.room.v1",
+  pendingInvite: "racing.pendingInvite.v1",
 };
 const DEFAULT_ROAD_WIDTH = 14;
 const DEFAULT_LOOP_LAPS = 3;
@@ -228,7 +258,7 @@ const CAR_MODELS = {
   },
 };
 const DRIFT_BOOST_CAR_IDS = new Set(["ae86", "rx7fd", "rx7fc"]);
-const DEFAULT_UNLOCKED_CARS = ["gt3"];
+const DEFAULT_UNLOCKED_CARS = ["gt3", "ae86"];
 const QUEST_GUEST_KEY = "__guest__";
 const TOUGE_COURSE_IDS = new Set(["map1", "map2", "map3", "akagi", "sadamine", "tsukuba"]);
 const F1_COURSE_IDS = new Set(["monaco", "spa"]);
@@ -510,6 +540,9 @@ const multiplayer = {
   connected: false,
   joined: false,
   lastSentAt: 0,
+  pendingStartAfterJoin: false,
+  pendingInviteResponse: null,
+  rooms: [],
 };
 const raceSession = {
   id: null,
@@ -541,6 +574,8 @@ let raceFinished = false;
 let currentPlayer = null;
 let sharedLeaderboard = {};
 let questScrollTimeout = null;
+let pendingRaceInvite = null;
+let pendingOnlineJoinRoomId = null;
 
 setupLighting();
 createWorld();
@@ -6057,9 +6092,11 @@ function renderQuestScreen() {
   questList.replaceChildren();
 
   const profile = getQuestProfile();
+  let visibleQuestCount = 0;
   for (const quest of QUEST_DEFS) {
     const rewardName = getCarName(quest.rewardCarId);
     const unlocked = profile.unlockedCars.includes(quest.rewardCarId);
+    if (unlocked) continue;
     const pending = profile.pendingRewards[quest.rewardCarId];
     const item = document.createElement("article");
     item.className = "quest-item";
@@ -6090,6 +6127,17 @@ function renderQuestScreen() {
 
     item.append(meta, details, status, action);
     questList.append(item);
+    visibleQuestCount += 1;
+  }
+
+  if (!visibleQuestCount) {
+    const empty = document.createElement("article");
+    empty.className = "quest-item is-complete";
+    empty.append(
+      createTextElement("strong", "All rewards owned"),
+      createTextElement("span", "Completed quests are cleared from this list."),
+    );
+    questList.append(empty);
   }
 }
 
@@ -6110,7 +6158,14 @@ function initializeMultiplayer() {
   multiplayer.socket.on("connect", () => {
     multiplayer.connected = true;
     multiplayer.selfId = multiplayer.socket.id;
-    joinMultiplayerRoom(getEnteredRoomId(), true);
+    updateMultiplayerRoomStatus();
+    requestRoomList();
+    const pendingInvite = loadStoredJson(STORAGE_KEYS.pendingInvite, null);
+    if (pendingInvite?.inviteId && pendingInvite?.roomId) {
+      joinMultiplayerRoom(pendingInvite.roomId, true, {
+        pendingInviteResponse: { inviteId: pendingInvite.inviteId, accepted: true },
+      });
+    }
   });
 
   multiplayer.socket.on("disconnect", () => {
@@ -6134,11 +6189,17 @@ function initializeMultiplayer() {
   multiplayer.socket.on("race:finished", handleRaceFinished);
   multiplayer.socket.on("race:completed", handleRaceCompleted);
   multiplayer.socket.on("race:lineup", handleRaceLineup);
+  multiplayer.socket.on("race:invite", handleRaceInvite);
+  multiplayer.socket.on("race:inviteWaiting", handleRaceInviteWaiting);
+  multiplayer.socket.on("race:inviteExpired", handleRaceInviteExpired);
+  multiplayer.socket.on("rooms:snapshot", handleRoomsSnapshot);
 }
 
-function joinMultiplayerRoom(roomId = "lobby", isReconnect = false) {
+function joinMultiplayerRoom(roomId = "lobby", isReconnect = false, options = {}) {
   const safeRoomId = sanitizeRoomId(roomId);
   multiplayer.roomId = safeRoomId;
+  multiplayer.pendingStartAfterJoin = Boolean(options.startAfterJoin);
+  multiplayer.pendingInviteResponse = options.pendingInviteResponse ?? multiplayer.pendingInviteResponse;
   localStorage.setItem(STORAGE_KEYS.room, safeRoomId);
   syncRoomUrl(safeRoomId);
   if (roomIdInput) roomIdInput.value = safeRoomId;
@@ -6156,6 +6217,18 @@ function joinMultiplayerRoom(roomId = "lobby", isReconnect = false) {
     player: getMultiplayerProfile(),
     state: getMultiplayerState(),
   });
+}
+
+function leaveMultiplayerRoom() {
+  multiplayer.pendingStartAfterJoin = false;
+  multiplayer.pendingInviteResponse = null;
+  if (multiplayer.socket?.connected && multiplayer.joined) {
+    multiplayer.socket.emit("multiplayer:leaveRoom");
+  }
+  multiplayer.joined = false;
+  clearRemotePlayers();
+  resetRaceSession();
+  updateMultiplayerRoomStatus();
 }
 
 function handleMultiplayerJoined(payload = {}) {
@@ -6182,11 +6255,34 @@ function handleMultiplayerJoined(payload = {}) {
 
   updateMultiplayerRoomStatus(payload.players?.length ?? remotePlayers.size + 1);
   sendMultiplayerState(true);
+
+  if (multiplayer.pendingInviteResponse) {
+    const response = multiplayer.pendingInviteResponse;
+    multiplayer.pendingInviteResponse = null;
+    localStorage.removeItem(STORAGE_KEYS.pendingInvite);
+    sendRaceInviteResponse(response.inviteId, response.accepted);
+  }
+
+  if (multiplayer.pendingStartAfterJoin) {
+    multiplayer.pendingStartAfterJoin = false;
+    requestRaceStart();
+  }
 }
 
 function requestLeaderboardSnapshot() {
   if (!multiplayer.socket?.connected) return;
   multiplayer.socket.emit("leaderboard:request");
+}
+
+function requestRoomList() {
+  if (!multiplayer.socket?.connected) return;
+  multiplayer.socket.emit("rooms:list");
+}
+
+function handleRoomsSnapshot(payload = {}) {
+  multiplayer.rooms = Array.isArray(payload.rooms) ? payload.rooms : [];
+  renderOnlineRooms();
+  updateMultiplayerRoomStatus();
 }
 
 function submitLeaderboardRecord(record, courseId = selectedCourseId) {
@@ -6326,10 +6422,15 @@ function setupRaceScreen({ keepResults = false } = {}) {
   blurActiveUiControl();
   cancelRaceCountdown();
   if (!keepResults) hideResultsOverlay();
+  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
   raceFinished = false;
   menuActive = false;
   mainMenu?.classList.add("is-hidden");
   if (developersScreen) developersScreen.hidden = true;
+  if (setupScreen) setupScreen.hidden = true;
+  if (modeScreen) modeScreen.hidden = true;
+  if (onlineScreen) onlineScreen.hidden = true;
+  if (onlineVehicleScreen) onlineVehicleScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
   if (mapScreen) mapScreen.hidden = true;
   if (rankingsScreen) rankingsScreen.hidden = true;
@@ -6380,6 +6481,8 @@ function handleRaceSnapshot(payload = {}) {
 function handleRaceCountdown(payload = {}) {
   if (!isRacePayloadForCurrentCourse(payload)) return;
 
+  pendingRaceInvite = null;
+  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
   updateRaceSession(payload);
   const participant = getSelfRaceParticipant();
   if (!participant) {
@@ -6445,18 +6548,9 @@ function handleRaceLineup(payload = {}) {
 
   const participants = normalizeRaceParticipants(payload.participants);
   const selfIndex = participants.findIndex((participant) => participant.id === multiplayer.selfId);
-  const gridSlot = selfIndex >= 0 ? participants[selfIndex].gridSlot ?? selfIndex : participants.length;
-  const gridTotal = Math.max(participants.length, 1);
-
-  resetRaceSession();
   raceSession.participants = participants;
-  raceSession.gridSlot = gridSlot;
-  raceSession.gridTotal = gridTotal;
-  setupRaceScreen({ keepResults: Boolean(resultsOverlay && !resultsOverlay.hidden) });
-  resetCar(gridSlot, gridTotal);
-  paused = true;
-  pauseStartedAt = null;
-  syncPauseButton();
+  raceSession.gridSlot = selfIndex >= 0 ? participants[selfIndex].gridSlot ?? selfIndex : 0;
+  raceSession.gridTotal = Math.max(participants.length, 1);
   message.textContent = "READY";
   message.classList.add("is-visible");
 }
@@ -6874,6 +6968,8 @@ function setupMenu() {
   updateSelectedCourseUi();
   renderQuestScreen();
   renderRankingsScreen();
+  renderOnlineVehiclePicker();
+  renderOnlineRooms();
   updateAuthUi();
   syncPauseButton();
   if (menuReturnButton) menuReturnButton.hidden = true;
@@ -6888,7 +6984,24 @@ function setupMenu() {
   mapButton?.addEventListener("click", () => showMenuScreen("map"));
   rankingsButton?.addEventListener("click", () => showMenuScreen("rankings"));
   helpButton?.addEventListener("click", () => showMenuScreen("help"));
-  joinRoomButton?.addEventListener("click", () => joinMultiplayerRoom(getEnteredRoomId()));
+  setupBackButton?.addEventListener("click", showMainMenu);
+  setupGarageButton?.addEventListener("click", () => showMenuScreen("garage"));
+  setupMapButton?.addEventListener("click", () => showMenuScreen("map"));
+  setupOnlineRoomsButton?.addEventListener("click", () => showMenuScreen("online"));
+  setupNextButton?.addEventListener("click", () => showMenuScreen("mode"));
+  modeBackButton?.addEventListener("click", () => showMenuScreen("setup"));
+  offlineModeButton?.addEventListener("click", startOfflineRace);
+  onlineModeButton?.addEventListener("click", () => showMenuScreen("online"));
+  onlineBackButton?.addEventListener("click", () => showMenuScreen("mode"));
+  onlineCreateStartButton?.addEventListener("click", startCreatedOnlineRoom);
+  refreshRoomsButton?.addEventListener("click", requestRoomList);
+  joinRoomButton?.addEventListener("click", () => openOnlineVehiclePicker(getEnteredRoomId()));
+  onlineVehicleBackButton?.addEventListener("click", () => showMenuScreen("online"));
+  onlineJoinSelectedButton?.addEventListener("click", joinSelectedOnlineRoom);
+  onlineRoomList?.addEventListener("click", handleOnlineRoomListClick);
+  onlineVehicleList?.addEventListener("click", handleOnlineVehicleListClick);
+  raceInviteAcceptButton?.addEventListener("click", acceptRaceInvite);
+  raceInviteDeclineButton?.addEventListener("click", declineRaceInvite);
   authLoginButton?.addEventListener("click", () => showMenuScreen("login"));
   authSignupButton?.addEventListener("click", () => showMenuScreen("signup"));
   loginToSignupButton?.addEventListener("click", () => showMenuScreen("signup"));
@@ -6923,9 +7036,7 @@ function setupMenu() {
     option.addEventListener("click", () => selectRankingsCourse(option.dataset.rankingsCourseId));
   }
 
-  if (URL_PARAMS.get("autostart") === "1" || window.location.hash.includes("autostart")) {
-    window.setTimeout(startGame, 0);
-  }
+  showInitialAuthGate();
 }
 
 function startGame() {
@@ -6941,13 +7052,190 @@ function startGame() {
     return;
   }
 
-  requestRaceStart();
+  showMenuScreen("setup");
+}
+
+function startOfflineRace() {
+  if (!ensureSelectedCarUnlocked()) return;
+  leaveMultiplayerRoom();
+  startLocalRace();
+}
+
+function startCreatedOnlineRoom() {
+  if (!ensureSelectedCarUnlocked()) return;
+  if (!multiplayer.socket?.connected) {
+    flashMessage("ONLINE OFFLINE");
+    return;
+  }
+  joinMultiplayerRoom(getEnteredRoomId(), false, { startAfterJoin: true });
+}
+
+function renderOnlineRooms() {
+  if (!onlineRoomList) return;
+  onlineRoomList.replaceChildren();
+
+  const rooms = multiplayer.rooms.filter((room) => room.roomId && room.playerCount > 0);
+  if (!rooms.length) {
+    const empty = document.createElement("article");
+    empty.className = "online-room-item";
+    empty.append(createTextElement("strong", "No rooms yet"), createTextElement("span", "Create a room to let other players join."));
+    onlineRoomList.append(empty);
+    return;
+  }
+
+  for (const room of rooms) {
+    const item = document.createElement("article");
+    item.className = "online-room-item";
+    const course = COURSE_DEFS[room.courseId] ?? COURSE_DEFS[DEFAULT_COURSE_ID];
+    item.append(
+      createTextElement("strong", room.roomId),
+      createTextElement("span", `${room.playerCount} player${room.playerCount === 1 ? "" : "s"} / ${course.menuLabel ?? course.name}`),
+    );
+
+    const joinButton = document.createElement("button");
+    joinButton.className = "menu-button";
+    joinButton.type = "button";
+    joinButton.dataset.joinRoomId = room.roomId;
+    joinButton.textContent = room.roomId === multiplayer.roomId && multiplayer.joined ? "Joined" : "Join";
+    item.append(joinButton);
+    onlineRoomList.append(item);
+  }
+}
+
+function handleOnlineRoomListClick(event) {
+  const button = event.target.closest("[data-join-room-id]");
+  if (!button) return;
+  openOnlineVehiclePicker(button.dataset.joinRoomId);
+}
+
+function openOnlineVehiclePicker(roomId) {
+  pendingOnlineJoinRoomId = sanitizeRoomId(roomId);
+  renderOnlineVehiclePicker();
+  showMenuScreen("onlineVehicle");
+}
+
+function renderOnlineVehiclePicker() {
+  if (!onlineVehicleList) return;
+  onlineVehicleList.replaceChildren();
+
+  for (const [carId, car] of Object.entries(CAR_MODELS)) {
+    const unlocked = isCarUnlocked(carId);
+    const option = document.createElement("button");
+    option.className = "online-vehicle-option";
+    option.type = "button";
+    option.dataset.onlineCarId = carId;
+    option.disabled = !unlocked;
+    option.classList.toggle("is-selected", carId === selectedCarId);
+    option.classList.toggle("is-locked", !unlocked);
+
+    const preview = document.createElement("span");
+    preview.className = `garage-preview ${car.previewClass}`;
+    const image = document.createElement("img");
+    image.className = "garage-preview-image";
+    image.src = car.previewImage;
+    image.alt = "";
+    preview.append(image);
+    option.append(preview, createTextElement("strong", car.name));
+    onlineVehicleList.append(option);
+  }
+}
+
+function handleOnlineVehicleListClick(event) {
+  const option = event.target.closest("[data-online-car-id]");
+  if (!option || option.disabled) return;
+  selectCar(option.dataset.onlineCarId);
+  renderOnlineVehiclePicker();
+}
+
+function joinSelectedOnlineRoom() {
+  if (!ensureSelectedCarUnlocked()) return;
+  if (!multiplayer.socket?.connected) {
+    flashMessage("ONLINE OFFLINE");
+    return;
+  }
+  joinMultiplayerRoom(pendingOnlineJoinRoomId ?? getEnteredRoomId());
+  showMenuScreen("setup");
+  flashMessage("ROOM JOINED");
+}
+
+function handleRaceInvite(payload = {}) {
+  if (!payload.inviteId || !payload.roomId || !payload.courseId) return;
+  if (!currentPlayer) {
+    sendRaceInviteResponse(payload.inviteId, false);
+    return;
+  }
+
+  pendingRaceInvite = payload;
+  const course = COURSE_DEFS[payload.courseId] ?? COURSE_DEFS[DEFAULT_COURSE_ID];
+  if (raceInviteTitle) raceInviteTitle.textContent = `${payload.hostName ?? "A player"} wants to race`;
+  if (raceInviteDetails) {
+    raceInviteDetails.textContent = `${course.menuLabel ?? course.name} / Room ${payload.roomId}`;
+  }
+  if (raceInvitePrompt) raceInvitePrompt.hidden = false;
+  message.textContent = "RACE INVITE";
+  message.classList.add("is-visible");
+}
+
+function handleRaceInviteWaiting(payload = {}) {
+  message.textContent = payload.inviteCount ? `INVITING ${payload.inviteCount}` : "STARTING";
+  message.classList.add("is-visible");
+}
+
+function handleRaceInviteExpired(payload = {}) {
+  if (pendingRaceInvite?.inviteId === payload.inviteId) pendingRaceInvite = null;
+  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
+}
+
+function acceptRaceInvite() {
+  if (!pendingRaceInvite) return;
+  const invite = pendingRaceInvite;
+  pendingRaceInvite = null;
+  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
+
+  if (selectedCourseId !== invite.courseId) {
+    saveStoredJson(STORAGE_KEYS.pendingInvite, {
+      inviteId: invite.inviteId,
+      roomId: invite.roomId,
+      courseId: invite.courseId,
+    });
+    const url = new URL(window.location.href);
+    url.searchParams.set("track", invite.courseId);
+    url.searchParams.set("car", selectedCarId);
+    url.searchParams.set("room", invite.roomId);
+    window.location.href = url.toString();
+    return;
+  }
+
+  if (!multiplayer.joined || multiplayer.roomId !== invite.roomId) {
+    joinMultiplayerRoom(invite.roomId, false, {
+      pendingInviteResponse: { inviteId: invite.inviteId, accepted: true },
+    });
+    return;
+  }
+
+  sendRaceInviteResponse(invite.inviteId, true);
+}
+
+function declineRaceInvite() {
+  if (!pendingRaceInvite) return;
+  sendRaceInviteResponse(pendingRaceInvite.inviteId, false);
+  pendingRaceInvite = null;
+  if (raceInvitePrompt) raceInvitePrompt.hidden = true;
+}
+
+function sendRaceInviteResponse(inviteId, accepted) {
+  if (!multiplayer.socket?.connected || !inviteId) return;
+  multiplayer.socket.emit("race:inviteResponse", { inviteId, accepted: Boolean(accepted) });
 }
 
 function showMenuScreen(screen) {
   blurActiveUiControl();
   if (mainMenu) mainMenu.classList.add("is-hidden");
   if (developersScreen) developersScreen.hidden = screen !== "developers";
+  if (setupScreen) setupScreen.hidden = screen !== "setup";
+  if (modeScreen) modeScreen.hidden = screen !== "mode";
+  if (onlineScreen) onlineScreen.hidden = screen !== "online";
+  if (onlineVehicleScreen) onlineVehicleScreen.hidden = screen !== "onlineVehicle";
   if (garageScreen) garageScreen.hidden = screen !== "garage";
   if (mapScreen) mapScreen.hidden = screen !== "map";
   if (questScreen) questScreen.hidden = screen !== "quest";
@@ -6957,12 +7245,29 @@ function showMenuScreen(screen) {
   if (signupScreen) signupScreen.hidden = screen !== "signup";
   if (screen === "rankings") renderRankingsScreen();
   if (screen === "quest") renderQuestScreen();
+  if (screen === "setup") {
+    updateSelectedCarUi();
+    updateSelectedCourseUi();
+  }
+  if (screen === "online") {
+    requestRoomList();
+    renderOnlineRooms();
+  }
+  if (screen === "onlineVehicle") renderOnlineVehiclePicker();
   focusAuthScreen(screen);
 }
 
 function showMainMenu() {
+  if (!currentPlayer) {
+    showInitialAuthGate();
+    return;
+  }
   blurActiveUiControl();
   if (developersScreen) developersScreen.hidden = true;
+  if (setupScreen) setupScreen.hidden = true;
+  if (modeScreen) modeScreen.hidden = true;
+  if (onlineScreen) onlineScreen.hidden = true;
+  if (onlineVehicleScreen) onlineVehicleScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
   if (mapScreen) mapScreen.hidden = true;
   if (questScreen) questScreen.hidden = true;
@@ -6971,6 +7276,20 @@ function showMainMenu() {
   if (loginScreen) loginScreen.hidden = true;
   if (signupScreen) signupScreen.hidden = true;
   mainMenu?.classList.remove("is-hidden");
+  updateAuthUi();
+}
+
+function showInitialAuthGate() {
+  if (currentPlayer) {
+    const returnScreen = sessionStorage.getItem("racing.returnScreen");
+    sessionStorage.removeItem("racing.returnScreen");
+    if (returnScreen === "setup") showMenuScreen("setup");
+    else showMainMenu();
+    return;
+  }
+  const accounts = loadStoredJson(STORAGE_KEYS.accounts, {});
+  const hasAccounts = Object.keys(accounts).length > 0;
+  showMenuScreen(hasAccounts ? "login" : "signup");
 }
 
 function returnToMenu() {
@@ -6988,8 +7307,16 @@ function returnToMenu() {
   mouseControls.rightDown = false;
   cameraOrbit.active = false;
   syncPauseButton();
+  if (!currentPlayer) {
+    showInitialAuthGate();
+    return;
+  }
   mainMenu?.classList.remove("is-hidden");
   if (developersScreen) developersScreen.hidden = true;
+  if (setupScreen) setupScreen.hidden = true;
+  if (modeScreen) modeScreen.hidden = true;
+  if (onlineScreen) onlineScreen.hidden = true;
+  if (onlineVehicleScreen) onlineVehicleScreen.hidden = true;
   if (garageScreen) garageScreen.hidden = true;
   if (mapScreen) mapScreen.hidden = true;
   if (questScreen) questScreen.hidden = true;
@@ -7132,6 +7459,7 @@ function ensureSelectedCarUnlocked() {
 function selectCourse(courseId) {
   if (!COURSE_DEFS[courseId] || courseId === selectedCourseId) return;
 
+  sessionStorage.setItem("racing.returnScreen", "setup");
   const url = new URL(window.location.href);
   url.searchParams.set("track", courseId);
   url.searchParams.set("car", selectedCarId);
@@ -7177,6 +7505,14 @@ function updateSelectedCarUi() {
   if (selectedCarPreviewImage && selected.previewImage) {
     selectedCarPreviewImage.src = selected.previewImage;
   }
+  if (setupCarName) setupCarName.textContent = selected.name;
+  if (setupCarImage) {
+    setupCarImage.className = `garage-preview ${selected.previewClass}`;
+    setupCarImage.setAttribute("aria-label", `${selected.name} side view`);
+  }
+  if (setupCarPreviewImage && selected.previewImage) {
+    setupCarPreviewImage.src = selected.previewImage;
+  }
 
   for (const option of garageOptions) {
     const carId = option.dataset.carId;
@@ -7212,6 +7548,10 @@ function updateSelectedCourseUi() {
   if (selectedCourseName) {
     selectedCourseName.textContent = `${selected.menuLabel ?? selected.name} / ${selected.distanceLabel}`;
   }
+  if (setupCourseName) {
+    setupCourseName.textContent = `${selected.menuLabel ?? selected.name} / ${selected.distanceLabel}`;
+  }
+  drawSetupMapPreview(selectedCourseId);
   if (lapLabel) lapLabel.textContent = selected.loop ? "LAPS" : "RUN";
 
   for (const option of courseOptions) {
@@ -7224,6 +7564,64 @@ function updateSelectedCourseUi() {
       if (name) name.textContent = course.menuLabel ?? course.name;
       if (distance) distance.textContent = course.distanceLabel;
     }
+  }
+}
+
+function drawSetupMapPreview(courseId = selectedCourseId) {
+  if (!setupMapCanvas) return;
+  const context = setupMapCanvas.getContext("2d");
+  const course = COURSE_DEFS[courseId];
+  if (!context || !course) return;
+
+  const width = setupMapCanvas.width;
+  const height = setupMapCanvas.height;
+  const points = createTrackPoints(course);
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "rgba(5, 8, 10, 0.9)";
+  context.fillRect(0, 0, width, height);
+
+  if (!points.length) return;
+  const xs = points.map((point) => point.x);
+  const zs = points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+  const padding = 22;
+  const scale = Math.min(
+    (width - padding * 2) / Math.max(maxX - minX, 1),
+    (height - padding * 2) / Math.max(maxZ - minZ, 1),
+  ) * (course.miniMapScale ?? 1);
+  const centerX = (minX + maxX) * 0.5;
+  const centerZ = (minZ + maxZ) * 0.5;
+  const mapPoint = (point) => ({
+    x: width * 0.5 + (point.x - centerX) * scale,
+    y: height * 0.5 + (point.y - centerZ) * scale,
+  });
+
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = 11;
+  context.strokeStyle = "rgba(255, 255, 255, 0.13)";
+  context.beginPath();
+  for (const [index, point] of points.entries()) {
+    const mapped = mapPoint(point);
+    if (index === 0) context.moveTo(mapped.x, mapped.y);
+    else context.lineTo(mapped.x, mapped.y);
+  }
+  if (course.loop) context.closePath();
+  context.stroke();
+
+  context.lineWidth = 4;
+  context.strokeStyle = "#a7ff5b";
+  context.stroke();
+
+  for (const [index, color] of [[0, "#ffffff"], [points.length - 1, "#ff8b7f"]]) {
+    const mapped = mapPoint(points[index]);
+    context.fillStyle = color;
+    context.beginPath();
+    context.arc(mapped.x, mapped.y, 5, 0, Math.PI * 2);
+    context.fill();
   }
 }
 

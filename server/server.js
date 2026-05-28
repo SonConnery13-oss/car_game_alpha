@@ -11,7 +11,7 @@ const DEFAULT_ROOM_ID = "lobby";
 const LEADERBOARD_FILE = path.join(__dirname, "data", "leaderboard.json");
 const LEADERBOARD_LIMIT = 100;
 const RACE_COUNTDOWN_MS = 3600;
-const RACE_LINEUP_DELAY_MS = 4500;
+const RACE_INVITE_TIMEOUT_MS = 12000;
 const RACE_TIMEOUT_MS = 15 * 60 * 1000;
 
 const app = express();
@@ -24,6 +24,7 @@ const io = new Server(server, {
 
 const rooms = new Map();
 const raceSessions = new Map();
+const pendingRaceInvites = new Map();
 const leaderboard = loadLeaderboard();
 
 app.use(express.static(CLIENT_DIR));
@@ -34,6 +35,10 @@ app.get("/health", (_req, res) => {
 
 app.get("/api/leaderboard", (_req, res) => {
   res.json({ leaderboard: serializeLeaderboard() });
+});
+
+app.get("/api/rooms", (_req, res) => {
+  res.json({ rooms: serializeRooms() });
 });
 
 app.get("*", (_req, res) => {
@@ -70,6 +75,7 @@ io.on("connection", (socket) => {
       race: serializeRaceSession(getRaceSession(roomId, player.courseId), socket.id),
     });
     emitToCourse(roomId, player.courseId, "multiplayer:playerJoined", serializePlayer(room.get(socket.id)), socket.id);
+    broadcastRoomsSnapshot();
 
     const race = getRaceSession(roomId, player.courseId);
     if (isRaceActive(race) && !race.participants.has(socket.id)) {
@@ -90,10 +96,12 @@ io.on("connection", (socket) => {
     if (previousCourseId !== player.courseId) {
       emitToCourse(player.roomId, previousCourseId, "multiplayer:playerLeft", { id: socket.id }, socket.id);
       emitToCourse(player.roomId, player.courseId, "multiplayer:playerJoined", serializePlayer(player), socket.id);
+      broadcastRoomsSnapshot();
       return;
     }
 
     emitToCourse(player.roomId, player.courseId, "multiplayer:playerUpdated", serializePlayer(player));
+    broadcastRoomsSnapshot();
   });
 
   socket.on("multiplayer:state", (payload = {}) => {
@@ -112,6 +120,15 @@ io.on("connection", (socket) => {
     }, socket.id);
   });
 
+  socket.on("multiplayer:leaveRoom", () => {
+    leaveRoom(socket);
+    broadcastRoomsSnapshot();
+  });
+
+  socket.on("rooms:list", () => {
+    socket.emit("rooms:snapshot", { rooms: serializeRooms() });
+  });
+
   socket.on("race:startRequest", () => {
     const player = getSocketPlayer(socket);
     if (!player) return;
@@ -123,12 +140,11 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const participants = getCoursePlayers(player.roomId, player.courseId).filter(isRaceEligiblePlayer);
-    if (!participants.length) return;
+    createRaceInvite(player);
+  });
 
-    const race = createRaceSession(player.roomId, player.courseId, participants);
-    setRaceSession(race);
-    emitToCourse(player.roomId, player.courseId, "race:countdown", serializeRaceSession(race));
+  socket.on("race:inviteResponse", (payload = {}) => {
+    handleRaceInviteResponse(socket, payload);
   });
 
   socket.on("race:finish", (payload = {}) => {
@@ -164,12 +180,33 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     leaveRoom(socket);
+    broadcastRoomsSnapshot();
   });
 });
 
 function getRoom(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, new Map());
   return rooms.get(roomId);
+}
+
+function serializeRooms() {
+  return [...rooms.entries()]
+    .map(([roomId, room]) => {
+      const players = [...room.values()];
+      const host = players.sort((a, b) => a.joinedAt - b.joinedAt || a.id.localeCompare(b.id))[0] ?? null;
+      return {
+        roomId,
+        playerCount: room.size,
+        courseId: host?.courseId ?? "map1",
+        hostName: host?.displayName ?? "Host",
+      };
+    })
+    .filter((room) => room.playerCount > 0)
+    .sort((a, b) => a.roomId.localeCompare(b.roomId));
+}
+
+function broadcastRoomsSnapshot() {
+  io.emit("rooms:snapshot", { rooms: serializeRooms() });
 }
 
 function getSocketPlayer(socket) {
@@ -207,8 +244,120 @@ function emitToCourse(roomId, courseId, event, payload, exceptId = null) {
   }
 }
 
+function emitToRaceMembers(race, event, payload) {
+  const ids = new Set([...race.participants.keys(), ...race.spectators]);
+  for (const id of ids) {
+    io.to(id).emit(event, payload);
+  }
+}
+
 function isRaceEligiblePlayer(player) {
   return !/^guest(?:-|$)/i.test(player.playerId);
+}
+
+function createRaceInvite(hostPlayer) {
+  const host = getRoom(hostPlayer.roomId).get(hostPlayer.id);
+  if (!host || !isRaceEligiblePlayer(host)) return;
+
+  const candidates = [...getRoom(host.roomId).values()]
+    .filter((player) => player.id !== host.id && isRaceEligiblePlayer(player));
+
+  if (!candidates.length) {
+    startRaceForPlayers(host, []);
+    return;
+  }
+
+  const invite = {
+    id: `${host.roomId}-${host.courseId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    roomId: host.roomId,
+    courseId: host.courseId,
+    hostId: host.id,
+    hostName: host.displayName,
+    candidates: new Set(candidates.map((player) => player.id)),
+    accepted: new Set(),
+    declined: new Set(),
+    timer: null,
+  };
+  pendingRaceInvites.set(invite.id, invite);
+
+  const timeoutAt = Date.now() + RACE_INVITE_TIMEOUT_MS;
+  for (const player of candidates) {
+    io.to(player.id).emit("race:invite", {
+      inviteId: invite.id,
+      roomId: invite.roomId,
+      courseId: invite.courseId,
+      hostName: invite.hostName,
+      timeoutAt,
+    });
+  }
+  io.to(host.id).emit("race:inviteWaiting", {
+    inviteId: invite.id,
+    inviteCount: candidates.length,
+    timeoutAt,
+  });
+
+  invite.timer = setTimeout(() => finalizeRaceInvite(invite.id), RACE_INVITE_TIMEOUT_MS);
+}
+
+function handleRaceInviteResponse(socket, payload = {}) {
+  const inviteId = String(payload.inviteId ?? "");
+  const invite = pendingRaceInvites.get(inviteId);
+  const player = getSocketPlayer(socket);
+  if (!invite || !player || player.roomId !== invite.roomId || !invite.candidates.has(player.id)) return;
+
+  invite.declined.delete(player.id);
+  invite.accepted.delete(player.id);
+
+  if (payload.accepted) {
+    invite.accepted.add(player.id);
+    if (player.courseId !== invite.courseId) {
+      const previousCourseId = player.courseId;
+      player.courseId = invite.courseId;
+      emitToCourse(player.roomId, previousCourseId, "multiplayer:playerLeft", { id: player.id }, player.id);
+      emitToCourse(player.roomId, player.courseId, "multiplayer:playerJoined", serializePlayer(player), player.id);
+      broadcastRoomsSnapshot();
+    }
+  } else {
+    invite.declined.add(player.id);
+  }
+
+  if (invite.accepted.size + invite.declined.size >= invite.candidates.size) {
+    finalizeRaceInvite(invite.id);
+  }
+}
+
+function finalizeRaceInvite(inviteId) {
+  const invite = pendingRaceInvites.get(inviteId);
+  if (!invite) return;
+
+  pendingRaceInvites.delete(inviteId);
+  if (invite.timer) clearTimeout(invite.timer);
+
+  for (const id of invite.candidates) {
+    io.to(id).emit("race:inviteExpired", { inviteId });
+  }
+
+  const room = rooms.get(invite.roomId);
+  const host = room?.get(invite.hostId);
+  if (!host) return;
+
+  const acceptedPlayers = [...invite.accepted]
+    .map((id) => room.get(id))
+    .filter((player) => player && player.courseId === invite.courseId && isRaceEligiblePlayer(player));
+
+  startRaceForPlayers(host, acceptedPlayers);
+}
+
+function startRaceForPlayers(host, acceptedPlayers) {
+  const existingRace = getRaceSession(host.roomId, host.courseId);
+  if (isRaceActive(existingRace)) return;
+
+  const participants = [host, ...acceptedPlayers].filter(isRaceEligiblePlayer);
+  if (!participants.length) return;
+
+  const race = createRaceSession(host.roomId, host.courseId, participants);
+  setRaceSession(race);
+  emitToRaceMembers(race, "race:countdown", serializeRaceSession(race));
 }
 
 function serializePlayer(player) {
@@ -254,7 +403,6 @@ function createRaceSession(roomId, courseId, players) {
     results: [],
     startTimer: null,
     timeoutTimer: null,
-    lineupTimer: null,
   };
 
   players
@@ -275,7 +423,7 @@ function createRaceSession(roomId, courseId, players) {
     const activeRace = getRaceSession(roomId, courseId);
     if (activeRace?.id !== race.id || activeRace.status !== "countdown") return;
     activeRace.status = "racing";
-    emitToCourse(roomId, courseId, "race:started", serializeRaceSession(activeRace));
+    emitToRaceMembers(activeRace, "race:started", serializeRaceSession(activeRace));
   }, Math.max(startAt - Date.now(), 0));
 
   race.timeoutTimer = setTimeout(() => {
@@ -342,7 +490,7 @@ function saveRaceFinish(player, payload = {}) {
   race.results.push(result);
   race.results.sort(compareRaceResults);
 
-  emitToCourse(player.roomId, player.courseId, "race:finished", {
+  emitToRaceMembers(race, "race:finished", {
     raceId: race.id,
     courseId: player.courseId,
     result: serializeRaceResult(result),
@@ -372,7 +520,7 @@ function removePlayerFromRace(player) {
     return;
   }
 
-  emitToCourse(player.roomId, player.courseId, "race:started", serializeRaceSession(race));
+  emitToRaceMembers(race, "race:started", serializeRaceSession(race));
 }
 
 function completeRace(race) {
@@ -381,26 +529,7 @@ function completeRace(race) {
   race.status = "completed";
   clearRaceTimers(race);
   raceSessions.delete(getRaceKey(race.roomId, race.courseId));
-  emitToCourse(race.roomId, race.courseId, "race:completed", serializeRaceSession(race));
-
-  race.lineupTimer = setTimeout(() => {
-    if (getRaceSession(race.roomId, race.courseId)) return;
-
-    const players = getCoursePlayers(race.roomId, race.courseId)
-      .sort((a, b) => a.joinedAt - b.joinedAt || a.id.localeCompare(b.id))
-      .map((player, index) => ({
-        id: player.id,
-        playerId: player.playerId,
-        displayName: player.displayName,
-        carId: player.carId,
-        gridSlot: index,
-      }));
-
-    emitToCourse(race.roomId, race.courseId, "race:lineup", {
-      courseId: race.courseId,
-      participants: players,
-    });
-  }, RACE_LINEUP_DELAY_MS);
+  emitToRaceMembers(race, "race:completed", serializeRaceSession(race));
 }
 
 function clearRaceTimers(race) {
