@@ -49,6 +49,15 @@ export const MAP_SADAMINE = {
   elevationAxis: { x: -0.35, z: -1 },
   elevationScale: 4.05,
   ridgeScale: 1.18,
+  downhillProfile: {
+    startElevation: 9,
+    finishElevation: -3.9,
+    ridgeInfluence: 0.23,
+    shoulderInfluence: 0.37,
+    featureInfluence: 0.42,
+    offRoadRippleScale: 0.5,
+  },
+  elevationBounds: { min: -5.4, max: 10.6 },
   sun: { x: -82, y: 122, z: -92 },
   fogDensity: 0.0034,
   controlPoints: [

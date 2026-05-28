@@ -49,6 +49,15 @@ export const MAP_AKAGI = {
   elevationAxis: { x: 0.18, z: -1 },
   elevationScale: 4.35,
   ridgeScale: 1.22,
+  downhillProfile: {
+    startElevation: 9.4,
+    finishElevation: -4,
+    ridgeInfluence: 0.22,
+    shoulderInfluence: 0.36,
+    featureInfluence: 0.4,
+    offRoadRippleScale: 0.48,
+  },
+  elevationBounds: { min: -5.6, max: 10.9 },
   sun: { x: -104, y: 124, z: -58 },
   fogDensity: 0.0035,
   controlPoints: [

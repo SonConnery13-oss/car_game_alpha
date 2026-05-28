@@ -49,6 +49,15 @@ export const MAP_TSUKUBA = {
   elevationAxis: { x: 0.42, z: -1 },
   elevationScale: 4.2,
   ridgeScale: 1.24,
+  downhillProfile: {
+    startElevation: 8.7,
+    finishElevation: -3.7,
+    ridgeInfluence: 0.23,
+    shoulderInfluence: 0.36,
+    featureInfluence: 0.42,
+    offRoadRippleScale: 0.5,
+  },
+  elevationBounds: { min: -5.3, max: 10.4 },
   sun: { x: -112, y: 124, z: -50 },
   fogDensity: 0.0035,
   controlPoints: [

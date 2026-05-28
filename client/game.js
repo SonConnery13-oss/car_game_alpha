@@ -218,7 +218,7 @@ const CAR_MODELS = {
     rimColor: 0xd6d8d4,
     brakeColor: 0xd03b26,
     tuning: {
-      maxForwardSpeed: 232 / 3.6,
+      maxForwardSpeed: 218 / 3.6,
       visualStiffnessScale: 0.96,
       visualDampingScale: 0.94,
     },
@@ -322,6 +322,8 @@ const FINISH_INDEX = resolveCourseIndex(
 );
 const START_GATE = createCourseGate(START_INDEX);
 const FINISH_GATE = createCourseGate(FINISH_INDEX);
+const trackProgressLookup = createTrackProgressLookup(trackPoints, activeCourse);
+const downhillProgressAxis = createDownhillProgressAxis(START_GATE.center, FINISH_GATE.center);
 const START_SPAWN_POINT = START_GATE.center.clone().addScaledVector(
   START_GATE.tangent,
   activeCourse.spawnOffset ?? (activeCourse.loop ? -2 : 2.8),
@@ -648,9 +650,13 @@ function getMountainTrackElevation(x, z) {
   const normalizedAxisZ = axis.z / axisLength;
   const elevationReferenceSize = activeCourse.elevationReferenceSize ?? 560;
   const gradeScale = activeCourse.elevationGradeScale ?? 1;
-  const grade = ((x * normalizedAxisX + z * normalizedAxisZ) / (elevationReferenceSize / 2)) *
+  const axisGrade = ((x * normalizedAxisX + z * normalizedAxisZ) / (elevationReferenceSize / 2)) *
     (activeCourse.elevationScale ?? 2.8) *
     gradeScale;
+  const downhillProfile = activeCourse.downhillProfile ?? null;
+  const downhillSample = downhillProfile ? getNearestTrackSample(x, z) : null;
+  const downhillGrade = getDownhillCourseGrade(x, z, downhillSample);
+  const grade = downhillGrade ?? axisGrade;
   const startDistance = Math.hypot(x - START_X, z - START_Z);
   const waveFrequencyScale = getElevationWaveFrequencyScale();
   const startBlend = smootherstep(5, 24, startDistance);
@@ -661,14 +667,99 @@ function getMountainTrackElevation(x, z) {
     0.48 * Math.exp(-((x + 110) ** 2) / 3600 - ((z - 70) ** 2) / 5200) -
     0.32 * Math.exp(-((x - 120) ** 2) / 4200 - ((z + 110) ** 2) / 4800);
   const courseFeatures = getCourseFeatureElevation(x, z);
-  const roadRipple = getSurfaceRipple(x, z) * 1.35 * startBlend;
+  const roadDistance = Math.sqrt(downhillSample?.distanceSq ?? Infinity);
+  const roadNoiseBlend = downhillProfile
+    ? smoothstep(
+        (activeCourse.roadWidth ?? DEFAULT_ROAD_WIDTH) * 1.1,
+        (activeCourse.roadWidth ?? DEFAULT_ROAD_WIDTH) * 4.2,
+        roadDistance,
+      )
+    : 1;
+  const ridgeInfluence = downhillProfile
+    ? THREE.MathUtils.lerp(downhillProfile.roadRidgeInfluence ?? 0, downhillProfile.ridgeInfluence ?? 0.28, roadNoiseBlend)
+    : 1;
+  const shoulderInfluence = downhillProfile
+    ? THREE.MathUtils.lerp(downhillProfile.roadShoulderInfluence ?? 0, downhillProfile.shoulderInfluence ?? 0.38, roadNoiseBlend)
+    : 1;
+  const featureInfluence = downhillProfile
+    ? THREE.MathUtils.lerp(downhillProfile.roadFeatureInfluence ?? 0, downhillProfile.featureInfluence ?? 0.42, roadNoiseBlend)
+    : 1;
+  const roadRippleScale = downhillProfile
+    ? THREE.MathUtils.lerp(downhillProfile.roadRippleScale ?? 0, downhillProfile.offRoadRippleScale ?? 0.5, roadNoiseBlend)
+    : 1.35;
+  const roadRipple = getSurfaceRipple(x, z) * roadRippleScale * startBlend;
   const ridgeScale = activeCourse.ridgeScale ?? 1;
 
   return applyStartFlattening(softClampElevation(
-    (grade + ridge * ridgeScale + shoulderCrown) * startBlend + courseFeatures + roadRipple,
+    (grade + ridge * ridgeScale * ridgeInfluence + shoulderCrown * shoulderInfluence) * startBlend +
+      courseFeatures * featureInfluence +
+      roadRipple,
     activeCourse.elevationBounds?.min ?? -2.3,
     activeCourse.elevationBounds?.max ?? (activeCourse.visualProfile === "spaArdennes" ? 8.4 : 5.8),
   ), x, z);
+}
+
+function getDownhillCourseGrade(x, z, nearestSample = null) {
+  const profile = activeCourse.downhillProfile;
+  if (!profile) return null;
+
+  const progress = nearestSample?.progress ?? getDownhillCourseProgress(x, z);
+  const shapedProgress = Math.pow(
+    THREE.MathUtils.clamp(progress, 0, 1),
+    profile.progressPower ?? 1,
+  );
+  const startElevation = profile.startElevation ?? 8;
+  const finishElevation = profile.finishElevation ?? -3.5;
+  return THREE.MathUtils.lerp(startElevation, finishElevation, shapedProgress);
+}
+
+function getDownhillCourseProgress(x, z) {
+  const nearestProgress = getNearestTrackProgress(x, z);
+  if (nearestProgress !== null) return nearestProgress;
+  if (!downhillProgressAxis || downhillProgressAxis.lengthSq < 0.0001) return 0;
+
+  const point = new THREE.Vector2(x, z).sub(downhillProgressAxis.start);
+  return THREE.MathUtils.clamp(
+    point.dot(downhillProgressAxis.direction) / downhillProgressAxis.lengthSq,
+    0,
+    1,
+  );
+}
+
+function getNearestTrackProgress(x, z) {
+  return getNearestTrackSample(x, z)?.progress ?? null;
+}
+
+function getNearestTrackSample(x, z) {
+  if (!trackProgressLookup) return null;
+
+  const { bins, binSize, searchRadius, maxDistanceSq, pointCount } = trackProgressLookup;
+  const binX = Math.floor(x / binSize);
+  const binZ = Math.floor(z / binSize);
+  let bestIndex = -1;
+  let bestDistanceSq = Infinity;
+
+  for (let dz = -searchRadius; dz <= searchRadius; dz += 1) {
+    for (let dx = -searchRadius; dx <= searchRadius; dx += 1) {
+      const indices = bins.get(getTrackProgressBinKey(binX + dx, binZ + dz));
+      if (!indices) continue;
+
+      for (const index of indices) {
+        const point = trackPoints[index];
+        const distanceSq = (point.x - x) ** 2 + (point.y - z) ** 2;
+        if (distanceSq < bestDistanceSq) {
+          bestDistanceSq = distanceSq;
+          bestIndex = index;
+        }
+      }
+    }
+  }
+
+  if (bestIndex < 0 || bestDistanceSq > maxDistanceSq) return null;
+  return {
+    distanceSq: bestDistanceSq,
+    progress: bestIndex / Math.max(pointCount - 1, 1),
+  };
 }
 
 function getCourseFeatureElevation(x, z) {
@@ -719,7 +810,11 @@ function applyStartFlattening(elevation, x, z) {
   const transition = activeCourse.startFlatTransition ?? 46;
   const distance = Math.hypot(x - START_X, z - START_Z);
   const trackBlend = smootherstep(radius, radius + transition, distance);
-  return THREE.MathUtils.lerp(activeCourse.startFlatElevation ?? 0, elevation, trackBlend);
+  return THREE.MathUtils.lerp(
+    activeCourse.startFlatElevation ?? activeCourse.downhillProfile?.startElevation ?? 0,
+    elevation,
+    trackBlend,
+  );
 }
 
 function getElevationWaveFrequencyScale() {
@@ -4988,6 +5083,45 @@ function createTrackPoints(course = activeCourse) {
   }
 
   return points;
+}
+
+function createTrackProgressLookup(points, course) {
+  const profile = course.downhillProfile;
+  if (!profile || points.length < 2) return null;
+
+  const binSize = profile.binSize ?? 44;
+  const bins = new Map();
+
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    const binX = Math.floor(point.x / binSize);
+    const binZ = Math.floor(point.y / binSize);
+    const key = getTrackProgressBinKey(binX, binZ);
+    if (!bins.has(key)) bins.set(key, []);
+    bins.get(key).push(index);
+  }
+
+  const roadInfluence = profile.roadInfluence ?? (course.roadWidth ?? DEFAULT_ROAD_WIDTH) * 5.5;
+  return {
+    bins,
+    binSize,
+    maxDistanceSq: roadInfluence ** 2,
+    pointCount: points.length,
+    searchRadius: profile.searchRadius ?? 3,
+  };
+}
+
+function createDownhillProgressAxis(start, finish) {
+  const direction = finish.clone().sub(start);
+  return {
+    start: start.clone(),
+    direction,
+    lengthSq: direction.lengthSq(),
+  };
+}
+
+function getTrackProgressBinKey(binX, binZ) {
+  return `${binX}:${binZ}`;
 }
 
 function resolveCourseIndex(index, fraction, fallback) {

@@ -49,6 +49,15 @@ export const MAP_3 = {
   elevationAxis: { x: -0.4, z: -1 },
   elevationScale: 3.8,
   ridgeScale: 1.28,
+  downhillProfile: {
+    startElevation: 8.9,
+    finishElevation: -3.6,
+    ridgeInfluence: 0.24,
+    shoulderInfluence: 0.38,
+    featureInfluence: 0.44,
+    offRoadRippleScale: 0.5,
+  },
+  elevationBounds: { min: -5.2, max: 10.4 },
   sun: { x: -108, y: 126, z: -44 },
   fogDensity: 0.0033,
   controlPoints: [
