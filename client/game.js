@@ -206,7 +206,7 @@ const CAR_MODELS = {
     rimColor: 0x16181a,
     brakeColor: 0xc52d22,
     tuning: {
-      maxForwardSpeed: 172 / 3.6,
+      maxForwardSpeed: 196 / 3.6,
       visualStiffnessScale: 0.84,
       visualDampingScale: 0.82,
     },
@@ -9494,9 +9494,9 @@ function updateCamera(delta) {
     desiredPosition = target.clone().add(orbitOffset);
     lookTarget = target.clone().add(up.clone().multiplyScalar(0.3));
   } else if (cameraMode === 0) {
-    const distance = THREE.MathUtils.lerp(6.7, 5.75, speedFactor) + (tuning.cameraDistanceOffset ?? 0) * 0.65;
-    const height = THREE.MathUtils.lerp(3.85, 4.52, speedFactor) + (tuning.cameraHeightOffset ?? 0) * 0.72;
-    const lookAhead = THREE.MathUtils.lerp(8.4, 12.0, speedFactor) + (tuning.cameraLookAheadOffset ?? 0) * 0.66;
+    const distance = 6.0 + (tuning.cameraDistanceOffset ?? 0) * 0.65;
+    const height = 4.12 + (tuning.cameraHeightOffset ?? 0) * 0.72;
+    const lookAhead = 9.8 + (tuning.cameraLookAheadOffset ?? 0) * 0.66;
     desiredPosition = target.clone().addScaledVector(cameraRig.forward, -distance).add(up.clone().multiplyScalar(height));
     lookTarget = target.clone().addScaledVector(cameraRig.forward, lookAhead).add(up.clone().multiplyScalar(0.15));
   } else {
