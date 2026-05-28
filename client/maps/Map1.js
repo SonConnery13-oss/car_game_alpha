@@ -50,14 +50,14 @@ export const MAP_1 = {
   elevationScale: 3.9,
   ridgeScale: 1.18,
   downhillProfile: {
-    startElevation: 15.4,
-    finishElevation: -7.8,
+    startElevation: 29,
+    finishElevation: -19,
     ridgeInfluence: 0.24,
     shoulderInfluence: 0.38,
     featureInfluence: 0.42,
     offRoadRippleScale: 0.5,
   },
-  elevationBounds: { min: -9.6, max: 17.2 },
+  elevationBounds: { min: -22.5, max: 32.5 },
   sun: { x: -92, y: 125, z: -48 },
   fogDensity: 0.0034,
   controlPoints: [

@@ -183,22 +183,24 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     lateralGrip: 0.99,
     longitudinalGrip: 0.92,
     engineForce: 16800,
-    brakeForce: 22500,
-    brakeBias: 0.74,
+    brakeForce: 23800,
+    brakeBias: 0.78,
     brakeResponse: 6.3,
     brakeReleaseResponse: 11.2,
-    brakeCorneringTorqueScale: 0.54,
-    rearBrakeCorneringTorqueScale: 0.24,
-    rearBrakeStabilityScale: 0.62,
-    brakeLateralReserve: 0.95,
-    rearBrakeLateralReserve: 0.84,
+    brakeCorneringTorqueScale: 0.48,
+    rearBrakeCorneringTorqueScale: 0.15,
+    rearBrakeStabilityScale: 0.76,
+    brakeLateralReserve: 0.98,
+    rearBrakeLateralReserve: 0.93,
     slideLateralDamping: 0.6,
     slideYawDamping: 0.86,
     brakeSlideStability: 0.66,
+    footBrakeSlideStability: 1.32,
     brakeDrift: true,
-    brakeDriftRearBrakeScale: 0.84,
+    footBrakeDriftScale: 0.28,
+    brakeDriftRearBrakeScale: 0.62,
     brakeDriftRearLateralScale: 0.82,
-    brakeDriftYawAssist: 0.24,
+    brakeDriftYawAssist: 0.12,
     handbrakeTorqueScale: 0.5,
     highSpeedGripLossStart: 126 / 3.6,
     highSpeedGripLossEnd: 196 / 3.6,
@@ -244,7 +246,7 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     maxForwardSpeed: 196 / 3.6,
     maxReverseSpeed: 32 / 3.6,
     abs: true,
-    absSlip: 0.74,
+    absSlip: 0.62,
     inertia: { linearDamping: 0.022, angularDamping: 0.25 },
   },
   rx7fd: {
@@ -266,22 +268,24 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     lateralGrip: 1.02,
     longitudinalGrip: 1.01,
     engineForce: 20500,
-    brakeForce: 29600,
-    brakeBias: 0.75,
+    brakeForce: 31000,
+    brakeBias: 0.79,
     brakeResponse: 6.1,
     brakeReleaseResponse: 10.8,
-    brakeCorneringTorqueScale: 0.52,
-    rearBrakeCorneringTorqueScale: 0.22,
-    rearBrakeStabilityScale: 0.58,
-    brakeLateralReserve: 0.98,
-    rearBrakeLateralReserve: 0.86,
+    brakeCorneringTorqueScale: 0.47,
+    rearBrakeCorneringTorqueScale: 0.14,
+    rearBrakeStabilityScale: 0.74,
+    brakeLateralReserve: 1,
+    rearBrakeLateralReserve: 0.94,
     slideLateralDamping: 0.62,
     slideYawDamping: 0.88,
     brakeSlideStability: 0.68,
+    footBrakeSlideStability: 1.34,
     brakeDrift: true,
-    brakeDriftRearBrakeScale: 0.86,
+    footBrakeDriftScale: 0.3,
+    brakeDriftRearBrakeScale: 0.64,
     brakeDriftRearLateralScale: 0.84,
-    brakeDriftYawAssist: 0.24,
+    brakeDriftYawAssist: 0.12,
     handbrakeTorqueScale: 0.5,
     driftRecoveryRate: 2.7,
     handbrakeRearGripScale: 0.31,
@@ -333,7 +337,7 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     maxForwardSpeed: 218 / 3.6,
     maxReverseSpeed: 35 / 3.6,
     abs: true,
-    absSlip: 0.68,
+    absSlip: 0.6,
     inertia: { linearDamping: 0.017, angularDamping: 0.33 },
   },
   rx7fc: {
@@ -355,22 +359,24 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     lateralGrip: 0.99,
     longitudinalGrip: 0.96,
     engineForce: 16400,
-    brakeForce: 25000,
-    brakeBias: 0.74,
+    brakeForce: 26400,
+    brakeBias: 0.78,
     brakeResponse: 5.6,
     brakeReleaseResponse: 9.8,
-    brakeCorneringTorqueScale: 0.54,
-    rearBrakeCorneringTorqueScale: 0.23,
-    rearBrakeStabilityScale: 0.6,
-    brakeLateralReserve: 0.96,
-    rearBrakeLateralReserve: 0.85,
+    brakeCorneringTorqueScale: 0.48,
+    rearBrakeCorneringTorqueScale: 0.15,
+    rearBrakeStabilityScale: 0.75,
+    brakeLateralReserve: 0.98,
+    rearBrakeLateralReserve: 0.93,
     slideLateralDamping: 0.6,
     slideYawDamping: 0.86,
     brakeSlideStability: 0.66,
+    footBrakeSlideStability: 1.32,
     brakeDrift: true,
-    brakeDriftRearBrakeScale: 0.84,
+    footBrakeDriftScale: 0.28,
+    brakeDriftRearBrakeScale: 0.62,
     brakeDriftRearLateralScale: 0.82,
-    brakeDriftYawAssist: 0.24,
+    brakeDriftYawAssist: 0.12,
     handbrakeTorqueScale: 0.5,
     driftRecoveryRate: 2.6,
     handbrakeRearGripScale: 0.3,
@@ -422,7 +428,7 @@ export const VEHICLE_PHYSICS_CONFIGS = {
     maxForwardSpeed: 204 / 3.6,
     maxReverseSpeed: 34 / 3.6,
     abs: true,
-    absSlip: 0.74,
+    absSlip: 0.62,
     inertia: { linearDamping: 0.02, angularDamping: 0.29 },
   },
   formulaRb22: {
@@ -1261,8 +1267,10 @@ export class VehiclePhysics {
   getBrakeDriftFactor(wheel) {
     if (wheel.isFront) return 0;
 
+    const footBrakeDemand =
+      smoothstep(0.12, 0.86, this.brakePressure) * (this.config.footBrakeDriftScale ?? 1);
     const brakeDemand = Math.max(
-      smoothstep(0.12, 0.86, this.brakePressure),
+      footBrakeDemand,
       this.input.handbrake ? 0.92 : 0,
     );
     const speedDemand = smoothstep(7, 28, Math.abs(wheel.forwardSpeed || this.signedSpeed));
@@ -1347,13 +1355,17 @@ export class VehiclePhysics {
       smoothstep(5, 28, Math.abs(this.signedSpeed));
     if (slipFactor <= 0.001) return;
 
+    const footBrakeBlend = smoothstep(0.05, 0.85, this.brakePressure);
     const handbrakeBlend = this.handbrakeDriftFactor * smoothstep(5, 24, Math.abs(this.signedSpeed));
-    const brakeBlend = Math.max(
-      smoothstep(0.05, 0.85, this.brakePressure),
+    const handbrakeBrakeBlend = Math.max(
       this.input.handbrake && this.config.brakeDrift ? 0.86 : 0,
       handbrakeBlend,
     );
-    const driftStabilityTarget = this.config.brakeSlideStability ?? (handbrakeBlend > 0.02 ? 0.52 : 0.65);
+    const brakeBlend = Math.max(footBrakeBlend, handbrakeBrakeBlend);
+    const footBrakeDominant = footBrakeBlend > handbrakeBrakeBlend && !this.input.handbrake;
+    const driftStabilityTarget = footBrakeDominant
+      ? this.config.footBrakeSlideStability ?? this.config.brakeSlideStability ?? 1
+      : this.config.brakeSlideStability ?? (handbrakeBlend > 0.02 ? 0.52 : 0.65);
     const stabilityGain = this.config.brakeDrift || handbrakeBlend > 0.02
       ? lerp(1, driftStabilityTarget, brakeBlend)
       : 1 + brakeBlend * (this.config.brakeSlideStability ?? 0.65);
