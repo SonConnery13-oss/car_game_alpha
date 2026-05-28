@@ -58,7 +58,9 @@
 
         <aside class="selected-car-panel" aria-label="Selected car">
           <div class="selected-car-preview">
-            <div id="selectedCarImage" class="garage-preview garage-preview-gt3"></div>
+            <div id="selectedCarImage" class="garage-preview garage-preview-gt3" role="img" aria-label="GT3 RS Prototype side view">
+              <img id="selectedCarPreviewImage" class="garage-preview-image" src="./assets/cars/gt3-side.png" alt="" />
+            </div>
           </div>
           <div class="selected-car-meta">
             <span id="selectedCarName" class="selected-car-name">GT3 RS Prototype</span>
@@ -127,11 +129,15 @@
               <h3 id="gt3CarsHeading">GT3</h3>
               <div class="garage-grid">
                 <button class="garage-option is-selected" type="button" data-car-id="gt3">
-                  <span class="garage-preview garage-preview-gt3"></span>
+                  <span class="garage-preview garage-preview-gt3">
+                    <img class="garage-preview-image" src="./assets/cars/gt3-side.png" alt="" loading="lazy" />
+                  </span>
                   <strong>GT3 RS Prototype</strong>
                 </button>
                 <button class="garage-option" type="button" data-car-id="amg">
-                  <span class="garage-preview garage-preview-amg"></span>
+                  <span class="garage-preview garage-preview-amg">
+                    <img class="garage-preview-image" src="./assets/cars/amg-side.png" alt="" loading="lazy" />
+                  </span>
                   <strong>AMG GT Track</strong>
                 </button>
               </div>
@@ -141,15 +147,21 @@
               <h3 id="tougeCarsHeading">Touge</h3>
               <div class="garage-grid">
                 <button class="garage-option" type="button" data-car-id="ae86">
-                  <span class="garage-preview garage-preview-ae86"></span>
+                  <span class="garage-preview garage-preview-ae86">
+                    <img class="garage-preview-image" src="./assets/cars/ae86-side.png" alt="" loading="lazy" />
+                  </span>
                   <strong>AE86 H2 Trueno</strong>
                 </button>
                 <button class="garage-option" type="button" data-car-id="rx7fd">
-                  <span class="garage-preview garage-preview-rx7fd"></span>
+                  <span class="garage-preview garage-preview-rx7fd">
+                    <img class="garage-preview-image" src="./assets/cars/rx7fd-side.png" alt="" loading="lazy" />
+                  </span>
                   <strong>RX-7 FD Spirit</strong>
                 </button>
                 <button class="garage-option" type="button" data-car-id="rx7fc">
-                  <span class="garage-preview garage-preview-rx7fc"></span>
+                  <span class="garage-preview garage-preview-rx7fc">
+                    <img class="garage-preview-image" src="./assets/cars/rx7fc-side.png" alt="" loading="lazy" />
+                  </span>
                   <strong>RX-7 FC Turbo</strong>
                 </button>
               </div>
@@ -159,7 +171,9 @@
               <h3 id="f1CarsHeading">F1</h3>
               <div class="garage-grid">
                 <button class="garage-option" type="button" data-car-id="formulaRb22">
-                  <span class="garage-preview garage-preview-formula"></span>
+                  <span class="garage-preview garage-preview-formula">
+                    <img class="garage-preview-image" src="./assets/cars/formula-rb22-side.png" alt="" loading="lazy" />
+                  </span>
                   <strong>Formula RB22</strong>
                 </button>
               </div>

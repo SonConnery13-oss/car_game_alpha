@@ -32,6 +32,7 @@ const rankingsButton = document.querySelector("#rankingsButton");
 const helpButton = document.querySelector("#helpButton");
 const selectedCarName = document.querySelector("#selectedCarName");
 const selectedCarImage = document.querySelector("#selectedCarImage");
+const selectedCarPreviewImage = document.querySelector("#selectedCarPreviewImage");
 const garageOptions = document.querySelectorAll("[data-car-id]");
 const courseOptions = document.querySelectorAll("[data-course-id]");
 const rankingsCourseOptions = document.querySelectorAll("[data-rankings-course-id]");
@@ -149,6 +150,7 @@ const CAR_MODELS = {
   gt3: {
     name: "GT3 RS Prototype",
     previewClass: "garage-preview-gt3",
+    previewImage: "./assets/cars/gt3-side.png",
     rimColor: 0xc52d22,
     brakeColor: 0xf5bf29,
     tuning: {
@@ -160,6 +162,7 @@ const CAR_MODELS = {
   amg: {
     name: "AMG GT Track",
     previewClass: "garage-preview-amg",
+    previewImage: "./assets/cars/amg-side.png",
     rimColor: 0x3c403d,
     brakeColor: 0x202427,
     tuning: {
@@ -171,6 +174,7 @@ const CAR_MODELS = {
   ae86: {
     name: "AE86 H2 Trueno",
     previewClass: "garage-preview-ae86",
+    previewImage: "./assets/cars/ae86-side.png",
     rimColor: 0x16181a,
     brakeColor: 0xc52d22,
     tuning: {
@@ -182,6 +186,7 @@ const CAR_MODELS = {
   rx7fd: {
     name: "RX-7 FD Spirit",
     previewClass: "garage-preview-rx7fd",
+    previewImage: "./assets/cars/rx7fd-side.png",
     rimColor: 0xd6d8d4,
     brakeColor: 0xd03b26,
     tuning: {
@@ -193,6 +198,7 @@ const CAR_MODELS = {
   rx7fc: {
     name: "RX-7 FC Turbo",
     previewClass: "garage-preview-rx7fc",
+    previewImage: "./assets/cars/rx7fc-side.png",
     rimColor: 0x24272a,
     brakeColor: 0x202427,
     tuning: {
@@ -204,6 +210,7 @@ const CAR_MODELS = {
   formulaRb22: {
     name: "Formula RB22",
     previewClass: "garage-preview-formula",
+    previewImage: "./assets/cars/formula-rb22-side.png",
     rimColor: 0x11141a,
     brakeColor: 0xffc23a,
     tuning: {
@@ -6891,6 +6898,10 @@ function updateSelectedCarUi() {
   if (selectedCarName) selectedCarName.textContent = selected.name;
   if (selectedCarImage) {
     selectedCarImage.className = `garage-preview ${selected.previewClass}`;
+    selectedCarImage.setAttribute("aria-label", `${selected.name} side view`);
+  }
+  if (selectedCarPreviewImage && selected.previewImage) {
+    selectedCarPreviewImage.src = selected.previewImage;
   }
 
   for (const option of garageOptions) {
