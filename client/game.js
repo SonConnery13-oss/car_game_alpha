@@ -255,7 +255,8 @@ const DRIFT_BOOST_CAR_IDS = new Set(["ae86", "rx7fd", "rx7fc"]);
 const DEFAULT_UNLOCKED_CARS = ["gt3", "ae86"];
 const QUEST_GUEST_KEY = "__guest__";
 const TOUGE_COURSE_IDS = new Set(["map1", "map2", "map3", "akagi", "sadamine", "tsukuba"]);
-const F1_COURSE_IDS = new Set(["monaco", "spa"]);
+const F1_COURSE_IDS = new Set(["monaco", "spa", "silverstone", "monza"]);
+const GRAND_PRIX_CIRCUIT_PROFILES = new Set(["spaArdennes", "silverstoneCircuit", "monzaCircuit"]);
 const TOUGE_REWARD_CAR_IDS = ["ae86", "rx7fd", "rx7fc"];
 const QUEST_DEFS = [
   {
@@ -264,7 +265,7 @@ const QUEST_DEFS = [
     title: "Unlock AMG GT Track",
     category: "F1 Track",
     targetTime: 10 * 60 * 1000,
-    description: "Finish Monaco or Spa within 10:00, then get this reward here.",
+    description: "Finish any F1 track within 10:00, then get this reward here.",
   },
   {
     id: "unlock-ae86",
@@ -296,7 +297,7 @@ const QUEST_DEFS = [
     title: "Unlock Formula RB22",
     category: "F1 Track",
     targetTime: 8 * 60 * 1000,
-    description: "Finish Monaco or Spa within 8:00, then get this reward here.",
+    description: "Finish any F1 track within 8:00, then get this reward here.",
   },
 ];
 const DRIFT_BOOST_CHARGE_MIN = 0.015;
@@ -1011,6 +1012,10 @@ function pseudoRandom(seed) {
   return Math.abs(Math.sin(seed * 12.9898) * 43758.5453) % 1;
 }
 
+function isGrandPrixCircuitProfile(profile = activeCourse.visualProfile) {
+  return GRAND_PRIX_CIRCUIT_PROFILES.has(profile);
+}
+
 function createWorld() {
   createSky();
   createGround();
@@ -1022,7 +1027,7 @@ function createWorld() {
 
   if (activeCourse.environment === "mountain") {
     createMountainScenery();
-    if (activeCourse.visualProfile === "spaArdennes") {
+    if (isGrandPrixCircuitProfile()) {
       createSpaCircuitScenery();
     }
   } else {
@@ -1199,9 +1204,9 @@ function createTrack() {
     polygonOffsetUnits: -3,
   });
   const redLineMaterial = new THREE.MeshBasicMaterial({
-    color: activeCourse.visualProfile === "spaArdennes" ? 0xd83a2f : activeCourse.environment === "mountain" ? 0x3f423b : 0xd92c24,
-    transparent: activeCourse.environment === "mountain" && activeCourse.visualProfile !== "spaArdennes",
-    opacity: activeCourse.environment === "mountain" && activeCourse.visualProfile !== "spaArdennes" ? 0.42 : 1,
+    color: isGrandPrixCircuitProfile() ? 0xd83a2f : activeCourse.environment === "mountain" ? 0x3f423b : 0xd92c24,
+    transparent: activeCourse.environment === "mountain" && !isGrandPrixCircuitProfile(),
+    opacity: activeCourse.environment === "mountain" && !isGrandPrixCircuitProfile() ? 0.42 : 1,
     side: THREE.DoubleSide,
     polygonOffset: true,
     polygonOffsetFactor: -5,
@@ -1275,7 +1280,7 @@ function createTrack() {
   rightRedLine.renderOrder = 5;
   scene.add(leftRedLine, rightRedLine);
 
-  if (activeCourse.visualProfile === "monacoStreet" || activeCourse.visualProfile === "spaArdennes") {
+  if (activeCourse.visualProfile === "monacoStreet" || isGrandPrixCircuitProfile()) {
     addCurbRibbons(1);
     addCurbRibbons(-1);
   }
@@ -2624,8 +2629,8 @@ function createCourseAdBoards() {
       map: makeTrackSignTexture(
         board.text ?? activeCourse.menuLabel ?? "GP",
         activeCourse.visualProfile === "monacoStreet" ? 0x0b2348 : 0x182318,
-        activeCourse.visualProfile === "spaArdennes" ? 0xffdf6e : 0xf7f2df,
-        activeCourse.visualProfile === "spaArdennes" ? 0xc83a2a : 0xd7ae42,
+        isGrandPrixCircuitProfile() ? 0xffdf6e : 0xf7f2df,
+        isGrandPrixCircuitProfile() ? 0xc83a2a : 0xd7ae42,
       ),
       side: THREE.DoubleSide,
     });
@@ -2674,9 +2679,9 @@ function createCourseGantries() {
     const signMaterial = new THREE.MeshBasicMaterial({
       map: makeTrackSignTexture(
         gantry.text ?? activeCourse.menuLabel ?? "GP",
-        gantry.background ?? (activeCourse.visualProfile === "spaArdennes" ? 0xf3ca21 : 0x057643),
+        gantry.background ?? (isGrandPrixCircuitProfile() ? 0xf3ca21 : 0x057643),
         gantry.foreground ?? 0x101214,
-        gantry.accent ?? (activeCourse.visualProfile === "spaArdennes" ? 0xd72f25 : 0xf7f3de),
+        gantry.accent ?? (isGrandPrixCircuitProfile() ? 0xd72f25 : 0xf7f3de),
       ),
     });
 

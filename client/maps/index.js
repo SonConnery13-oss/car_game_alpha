@@ -6,6 +6,8 @@ import { MAP_SADAMINE } from "./MapSadamine.js";
 import { MAP_TSUKUBA } from "./MapTsukuba.js";
 import { MAP_MONACO } from "./MapMonaco.js";
 import { MAP_SPA } from "./MapSpa.js";
+import { MAP_SILVERSTONE } from "./MapSilverstone.js";
+import { MAP_MONZA } from "./MapMonza.js";
 import { MAP_SUSPENSION } from "./MapSuspension.js";
 
 export const COURSE_DEFS = {
@@ -17,6 +19,8 @@ export const COURSE_DEFS = {
   [MAP_TSUKUBA.id]: MAP_TSUKUBA,
   [MAP_MONACO.id]: MAP_MONACO,
   [MAP_SPA.id]: MAP_SPA,
+  [MAP_SILVERSTONE.id]: MAP_SILVERSTONE,
+  [MAP_MONZA.id]: MAP_MONZA,
   [MAP_SUSPENSION.id]: MAP_SUSPENSION,
 };
 
