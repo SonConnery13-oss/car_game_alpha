@@ -5243,7 +5243,9 @@ function updateMiniMap() {
 
   drawMiniMapTrack(context, 12, "rgba(13, 19, 16, 0.84)");
   drawMiniMapTrack(context, 7, "rgba(238, 242, 231, 0.9)");
-  drawMiniMapTrack(context, 4, "rgba(54, 78, 36, 0.94)");
+  if (!drawMiniMapSectors(context, 4)) {
+    drawMiniMapTrack(context, 4, "rgba(54, 78, 36, 0.94)");
+  }
   drawMiniMapTrack(context, 2.2, "rgba(30, 32, 30, 0.96)");
   drawMiniMapCheckpoints(context);
   drawMiniMapRemotePlayers(context);
@@ -5257,6 +5259,54 @@ function drawMiniMapTrack(context, width, color) {
     if (index === 0) context.moveTo(mapped.x, mapped.y);
     else context.lineTo(mapped.x, mapped.y);
   });
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.stroke();
+}
+
+function drawMiniMapSectors(context, width) {
+  return drawCourseSectors(context, trackPoints, activeCourse, (point) => mapToMiniMap(point.x, point.y), width);
+}
+
+function drawCourseSectors(context, points, course, mapPoint, width) {
+  const sectors = course.sectors ?? [];
+  if (!sectors.length || points.length < 2) return false;
+
+  for (const sector of sectors) {
+    drawTrackFractionRange(
+      context,
+      points,
+      mapPoint,
+      sector.start ?? 0,
+      sector.end ?? 1,
+      width,
+      sector.color ?? "#a7ff5b",
+    );
+  }
+
+  return true;
+}
+
+function drawTrackFractionRange(context, points, mapPoint, start, end, width, color) {
+  const from = THREE.MathUtils.clamp(start, 0, 1);
+  const to = THREE.MathUtils.clamp(end, 0, 1);
+  if (from > to) {
+    drawTrackFractionRange(context, points, mapPoint, from, 1, width, color);
+    drawTrackFractionRange(context, points, mapPoint, 0, to, width, color);
+    return;
+  }
+
+  const maxIndex = Math.max(points.length - 1, 1);
+  const startIndex = Math.round(from * maxIndex);
+  const endIndex = Math.round(to * maxIndex);
+  if (endIndex <= startIndex) return;
+
+  context.beginPath();
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const mapped = mapPoint(points[index]);
+    if (index === startIndex) context.moveTo(mapped.x, mapped.y);
+    else context.lineTo(mapped.x, mapped.y);
+  }
   context.strokeStyle = color;
   context.lineWidth = width;
   context.stroke();
@@ -7673,10 +7723,10 @@ function updateSelectedCourseUi() {
   if (!selected) return;
 
   if (selectedCourseName) {
-    selectedCourseName.textContent = `${selected.menuLabel ?? selected.name} / ${selected.distanceLabel}`;
+    selectedCourseName.textContent = `${selected.menuLabel ?? selected.name} / ${getCourseMetaLabel(selected)}`;
   }
   if (setupCourseName) {
-    setupCourseName.textContent = `${selected.menuLabel ?? selected.name} / ${selected.distanceLabel}`;
+    setupCourseName.textContent = `${selected.menuLabel ?? selected.name} / ${getCourseMetaLabel(selected)}`;
   }
   drawSetupMapPreview(selectedCourseId);
   if (lapLabel) lapLabel.textContent = selected.loop ? "LAPS" : "RUN";
@@ -7689,9 +7739,13 @@ function updateSelectedCourseUi() {
       const name = option.querySelector("strong");
       const distance = option.querySelector("small");
       if (name) name.textContent = course.menuLabel ?? course.name;
-      if (distance) distance.textContent = course.distanceLabel;
+      if (distance) distance.textContent = getCourseMetaLabel(course);
     }
   }
+}
+
+function getCourseMetaLabel(course) {
+  return course.turnCount ? `${course.distanceLabel} / ${course.turnCount} turns` : course.distanceLabel;
 }
 
 function drawSetupMapPreview(courseId = selectedCourseId) {
@@ -7739,9 +7793,13 @@ function drawSetupMapPreview(courseId = selectedCourseId) {
   if (course.loop) context.closePath();
   context.stroke();
 
-  context.lineWidth = 4;
-  context.strokeStyle = "#a7ff5b";
-  context.stroke();
+  if (!drawCourseSectors(context, points, course, mapPoint, 4)) {
+    context.lineWidth = 4;
+    context.strokeStyle = "#a7ff5b";
+    context.stroke();
+  }
+
+  drawCourseCornerMarkers(context, points, course, mapPoint);
 
   for (const [index, color] of [[0, "#ffffff"], [points.length - 1, "#ff8b7f"]]) {
     const mapped = mapPoint(points[index]);
@@ -7750,6 +7808,36 @@ function drawSetupMapPreview(courseId = selectedCourseId) {
     context.arc(mapped.x, mapped.y, 5, 0, Math.PI * 2);
     context.fill();
   }
+}
+
+function drawCourseCornerMarkers(context, points, course, mapPoint) {
+  const markers = course.cornerMarkers ?? [];
+  if (!markers.length || points.length < 2) return;
+
+  context.save();
+  context.font = "800 6px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  for (const marker of markers) {
+    const index = THREE.MathUtils.clamp(
+      Math.round(THREE.MathUtils.clamp(marker.fraction ?? 0, 0, 1) * (points.length - 1)),
+      0,
+      points.length - 1,
+    );
+    const mapped = mapPoint(points[index]);
+    context.beginPath();
+    context.fillStyle = "rgba(246, 248, 250, 0.96)";
+    context.strokeStyle = "rgba(6, 8, 10, 0.72)";
+    context.lineWidth = 1.2;
+    context.arc(mapped.x, mapped.y, 6.2, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = "#11161a";
+    context.fillText(marker.label ?? "", mapped.x, mapped.y + 0.25);
+  }
+
+  context.restore();
 }
 
 function selectRankingsCourse(courseId) {
@@ -7766,7 +7854,7 @@ function renderRankingsScreen() {
   rankingsCourseId = course.id;
 
   if (rankingsCourseName) {
-    rankingsCourseName.textContent = `${course.name} / ${course.distanceLabel}`;
+    rankingsCourseName.textContent = `${course.name} / ${getCourseMetaLabel(course)}`;
   }
 
   for (const option of rankingsCourseOptions) {
