@@ -421,6 +421,8 @@ let boostAmount = 0;
 let driftLabelSprite = null;
 const driftSmokeParticles = [];
 const wallSparkParticles = [];
+const wallSparkPool = [];
+const wallSparkFreeList = [];
 const tireMarkSegments = [];
 const brakeLightTrails = [];
 const boostSpeedStreaks = [];
@@ -428,6 +430,9 @@ const vehicleCollisionDebris = [];
 const WALL_SPARK_GEOMETRY = new THREE.SphereGeometry(0.035, 6, 4);
 const WALL_SPARK_COLORS = [0xfff1a6, 0xffc247, 0xff742f];
 const LANDING_SPARK_COLORS = [0xfff6bd, 0xffd35c, 0xff8a34, 0xffffff];
+const WALL_SPARK_POOL_LIMIT = 150;
+const WALL_SPARK_MAX_ACTIVE = 120;
+const WALL_SPARK_COOLDOWN_MS = 58;
 const TIRE_MARK_GEOMETRY = new THREE.BoxGeometry(0.34, 0.012, 1.08);
 const BRAKE_TRAIL_GEOMETRY = new THREE.BoxGeometry(0.13, 0.04, 1);
 const BOOST_STREAK_GEOMETRY = new THREE.BoxGeometry(0.045, 0.045, 2.7);
@@ -1582,6 +1587,9 @@ function createLowTrackWalls() {
     thickness: activeCourse.wallThickness ?? 0.34,
     endGap: activeCourse.wallEndGap ?? (activeCourse.visualProfile === "monacoStreet" ? 0.08 : 1.05),
     segmentStep: activeCourse.wallSegmentStep ?? (activeCourse.visualProfile === "monacoStreet" ? 2 : 6),
+    collisionStep: activeCourse.wallCollisionStep,
+    collisionMinSegmentStep: activeCourse.wallCollisionMinSegmentStep,
+    castShadow: activeCourse.wallCastShadow,
     continuous: activeCourse.continuousWalls ?? false,
   };
 
@@ -1644,13 +1652,12 @@ function createMountainGuardRails() {
       if (startIndex % postStep === 0) {
         addPostMatrix(postMatrices, a.x, getTrackElevation(a.x, a.y) + 0.58, a.y, angle);
       }
-
-      createGuardRailCollision(centerX, groundY + 0.62, centerZ, angle, length);
     }
   }
 
   addInstancedMesh(railGeometry, railMaterial, railMatrices, true);
   addInstancedMesh(postGeometry, postMaterial, postMatrices, true);
+  createGuardRailCollisionLoops(sides, offset, railSettings);
 }
 
 function addRailMatrix(matrices, x, y, z, angle, length) {
@@ -1685,6 +1692,39 @@ function addInstancedMesh(geometry, material, matrices, castShadow = false) {
   mesh.receiveShadow = true;
   scene.add(mesh);
   return mesh;
+}
+
+function createGuardRailCollisionLoops(sides, offset, railSettings = {}) {
+  const visualStep = railSettings.segmentStep ?? 4;
+  const collisionStep = railSettings.collisionStep ?? Math.max(visualStep, isGrandPrixCircuitProfile() ? 4 : 7);
+  const minStep = railSettings.collisionMinSegmentStep ?? Math.max(1, Math.min(visualStep, 2));
+  const segmentLimit = activeCourse.loop ? trackPoints.length : trackPoints.length - 1;
+
+  for (const side of sides) {
+    if (!side.enabled) continue;
+
+    for (let i = 0; i < segmentLimit;) {
+      const currentStep = getAdaptiveTracksideSegmentStep(i, collisionStep, minStep);
+      const nextIndex = activeCourse.loop
+        ? (i + currentStep) % trackPoints.length
+        : Math.min(i + currentStep, trackPoints.length - 1);
+      const segment = getGuardRailSegment(i, nextIndex, side.value, offset, railSettings);
+      i += currentStep;
+      if (!segment) continue;
+
+      const { a, b } = segment;
+      const dx = b.x - a.x;
+      const dz = b.y - a.y;
+      const length = Math.hypot(dx, dz) + 0.18;
+      if (length < 1) continue;
+
+      const angle = Math.atan2(-dz, dx);
+      const centerX = (a.x + b.x) / 2;
+      const centerZ = (a.y + b.y) / 2;
+      const groundY = (getTrackElevation(a.x, a.y) + getTrackElevation(b.x, b.y)) / 2;
+      createGuardRailCollision(centerX, groundY + 0.62, centerZ, angle, length);
+    }
+  }
 }
 
 function createGuardRailCollision(centerX, centerY, centerZ, angle, length) {
@@ -1723,7 +1763,12 @@ function getGuardRailSegment(index, nextIndex, side, baseOffset, railSettings = 
 
 function createLowWallLoop(offset, material, options = {}) {
   const segmentStep = options.segmentStep ?? 6;
-  const segmentLimit = activeCourse.loop ? trackPoints.length : trackPoints.length - segmentStep;
+  const height = options.height ?? 0.52;
+  const thickness = options.thickness ?? 0.34;
+  const endGap = options.endGap ?? 1.05;
+  const segmentLimit = activeCourse.loop ? trackPoints.length : trackPoints.length - 1;
+  const wallGeometry = new THREE.BoxGeometry(1, height, thickness);
+  const wallMatrices = [];
 
   for (let i = 0; i < segmentLimit;) {
     const startIndex = i;
@@ -1735,7 +1780,27 @@ function createLowWallLoop(offset, material, options = {}) {
     i += currentStep;
 
     if (shouldSkipTrackWallSegment(startIndex, midpoint, options)) continue;
-    createLowWallSegment(a, b, material, options.height ?? 0.52, options.thickness ?? 0.34, options.endGap ?? 1.05);
+    const transform = getLowWallSegmentTransform(a, b, height, thickness, endGap);
+    if (transform) wallMatrices.push(transform.matrix);
+  }
+
+  addInstancedMesh(wallGeometry, material, wallMatrices, options.castShadow ?? true);
+
+  if (options.collision === false) return;
+
+  const collisionStep = options.collisionStep ?? segmentStep;
+  const collisionMinStep = options.collisionMinSegmentStep ?? options.minSegmentStep ?? 1;
+  for (let i = 0; i < segmentLimit;) {
+    const startIndex = i;
+    const currentStep = getAdaptiveTracksideSegmentStep(i, collisionStep, collisionMinStep);
+    const nextIndex = activeCourse.loop ? (i + currentStep) % trackPoints.length : Math.min(i + currentStep, trackPoints.length - 1);
+    const a = getOffsetTrackPoint(i, getRoadEdgeAwareOffset(offset, i));
+    const b = getOffsetTrackPoint(nextIndex, getRoadEdgeAwareOffset(offset, nextIndex));
+    const midpoint = a.clone().add(b).multiplyScalar(0.5);
+    i += currentStep;
+
+    if (shouldSkipTrackWallSegment(startIndex, midpoint, options)) continue;
+    createLowWallCollisionSegment(a, b, height, thickness, endGap);
   }
 }
 
@@ -1985,28 +2050,53 @@ function createGrandstand(index, side, standMaterial, seatMaterial, roofMaterial
 }
 
 function createLowWallSegment(a, b, material, height = 0.52, thickness = 0.34, endGap = 0.65) {
+  const transform = getLowWallSegmentTransform(a, b, height, thickness, endGap);
+  if (!transform) return;
+
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(transform.length, height, thickness), material);
+  mesh.position.set(transform.centerX, transform.y, transform.centerZ);
+  mesh.rotation.y = transform.angle;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+
+  createLowWallCollisionFromTransform(transform, height, thickness);
+}
+
+function getLowWallSegmentTransform(a, b, height = 0.52, thickness = 0.34, endGap = 0.65) {
   const dx = b.x - a.x;
   const dz = b.y - a.y;
   const length = Math.hypot(dx, dz) - endGap;
 
-  if (length < 1.2) return;
+  if (length < 1.2) return null;
 
   const angle = Math.atan2(-dz, dx);
   const centerX = (a.x + b.x) / 2;
   const centerZ = (a.y + b.y) / 2;
   const groundY = (getTrackElevation(a.x, a.y) + getTrackElevation(b.x, b.y)) / 2;
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, height, thickness), material);
-  mesh.position.set(centerX, groundY + height / 2 + 0.03, centerZ);
-  mesh.rotation.y = angle;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  scene.add(mesh);
+  const y = groundY + height / 2 + 0.03;
+  const matrix = new THREE.Matrix4();
+  matrix.compose(
+    new THREE.Vector3(centerX, y, centerZ),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle),
+    new THREE.Vector3(length, 1, 1),
+  );
 
+  return { angle, centerX, centerZ, length, matrix, y };
+}
+
+function createLowWallCollisionSegment(a, b, height = 0.52, thickness = 0.34, endGap = 0.65) {
+  const transform = getLowWallSegmentTransform(a, b, height, thickness, endGap);
+  if (!transform) return;
+  createLowWallCollisionFromTransform(transform, height, thickness);
+}
+
+function createLowWallCollisionFromTransform(transform, height, thickness) {
   const body = new CANNON.Body({ mass: 0, material: barrierMaterial });
   body.userData = { type: "barrier" };
-  body.position.set(centerX, groundY + height / 2 + 0.03, centerZ);
-  body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
-  body.addShape(new CANNON.Box(new CANNON.Vec3(length / 2, height / 2, thickness / 2)));
+  body.position.set(transform.centerX, transform.y, transform.centerZ);
+  body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), transform.angle);
+  body.addShape(new CANNON.Box(new CANNON.Vec3(transform.length / 2, height / 2, thickness / 2)));
   world.addBody(body);
 }
 
@@ -9364,7 +9454,7 @@ function handleChassisCollision(event) {
 
   const impact = Math.max(0, -normalSpeed) + tangentSpeed * 0.28;
   const now = performance.now();
-  if (impact < 4.2 || now - lastWallSparkAt < 34) return;
+  if (impact < 4.2 || now - lastWallSparkAt < WALL_SPARK_COOLDOWN_MS) return;
 
   const point = getBarrierContactPoint(contact);
   emitWallSparks(point, normal, tangentSpeed, impact);
@@ -9411,17 +9501,11 @@ function getBarrierContactPoint(contact) {
   );
 }
 
-function emitWallSparks(point, normal, tangentSpeed, impact) {
-  const normalVector = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
-  const carVelocity = new THREE.Vector3(chassisBody.velocity.x, chassisBody.velocity.y, chassisBody.velocity.z);
-  const tangent = carVelocity.clone().addScaledVector(normalVector, -carVelocity.dot(normalVector));
-  if (tangent.lengthSq() < 0.001) tangent.set(Math.random() - 0.5, 0, Math.random() - 0.5);
-  tangent.normalize();
+function acquireWallSpark(color) {
+  let spark = wallSparkFreeList.pop();
 
-  const count = THREE.MathUtils.clamp(Math.floor(impact * 1.2), 5, 18);
-  for (let i = 0; i < count; i += 1) {
-    const color = WALL_SPARK_COLORS[Math.floor(Math.random() * WALL_SPARK_COLORS.length)];
-    const spark = new THREE.Mesh(
+  if (!spark && wallSparkPool.length < WALL_SPARK_POOL_LIMIT) {
+    spark = new THREE.Mesh(
       WALL_SPARK_GEOMETRY,
       new THREE.MeshBasicMaterial({
         color,
@@ -9431,6 +9515,51 @@ function emitWallSparks(point, normal, tangentSpeed, impact) {
         depthWrite: false,
       }),
     );
+    spark.visible = false;
+    spark.userData.active = false;
+    scene.add(spark);
+    wallSparkPool.push(spark);
+  }
+
+  if (!spark) {
+    spark = wallSparkParticles.shift();
+    if (!spark) return null;
+  }
+
+  spark.visible = true;
+  spark.userData.active = true;
+  spark.material.color.setHex(color);
+  spark.material.opacity = 1;
+  return spark;
+}
+
+function releaseWallSpark(spark) {
+  if (!spark || !spark.userData.active) return;
+  spark.visible = false;
+  spark.userData.active = false;
+  spark.userData.life = 0;
+  spark.userData.maxLife = 0;
+  wallSparkFreeList.push(spark);
+}
+
+function trimWallSparkParticles(maxCount = WALL_SPARK_MAX_ACTIVE) {
+  while (wallSparkParticles.length > maxCount) {
+    releaseWallSpark(wallSparkParticles.shift());
+  }
+}
+
+function emitWallSparks(point, normal, tangentSpeed, impact) {
+  const normalVector = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
+  const carVelocity = new THREE.Vector3(chassisBody.velocity.x, chassisBody.velocity.y, chassisBody.velocity.z);
+  const tangent = carVelocity.clone().addScaledVector(normalVector, -carVelocity.dot(normalVector));
+  if (tangent.lengthSq() < 0.001) tangent.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+  tangent.normalize();
+
+  const count = THREE.MathUtils.clamp(Math.floor(impact * 0.75), 3, 9);
+  for (let i = 0; i < count; i += 1) {
+    const color = WALL_SPARK_COLORS[Math.floor(Math.random() * WALL_SPARK_COLORS.length)];
+    const spark = acquireWallSpark(color);
+    if (!spark) continue;
     spark.position.copy(point);
     spark.position.addScaledVector(normalVector, 0.08 + Math.random() * 0.1);
     spark.scale.setScalar(0.8 + Math.random() * 1.6);
@@ -9442,8 +9571,9 @@ function emitWallSparks(point, normal, tangentSpeed, impact) {
       .addScaledVector(normalVector, 0.9 + Math.random() * 1.8);
     spark.userData.velocity.y += 0.65 + Math.random() * 1.35;
     wallSparkParticles.push(spark);
-    scene.add(spark);
   }
+
+  trimWallSparkParticles();
 }
 
 function emitLandingSparks(impact, airborneTime, groundNormal) {
@@ -9459,24 +9589,16 @@ function emitLandingSparks(impact, airborneTime, groundNormal) {
     ))
     : [new THREE.Vector3(chassisBody.position.x, getTrackElevation(chassisBody.position.x, chassisBody.position.z), chassisBody.position.z)];
   const sparksPerPoint = THREE.MathUtils.clamp(
-    Math.floor(impact * 0.9 + airborneTime * 12),
-    6,
-    18,
+    Math.floor(impact * 0.58 + airborneTime * 8),
+    4,
+    10,
   );
 
   for (const point of points) {
     for (let i = 0; i < sparksPerPoint; i += 1) {
       const color = LANDING_SPARK_COLORS[Math.floor(Math.random() * LANDING_SPARK_COLORS.length)];
-      const spark = new THREE.Mesh(
-        WALL_SPARK_GEOMETRY,
-        new THREE.MeshBasicMaterial({
-          color,
-          transparent: true,
-          opacity: 0.95,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        }),
-      );
+      const spark = acquireWallSpark(color);
+      if (!spark) continue;
       const sideSpread = (Math.random() - 0.5) * 1.4;
       const rearSpray = -(0.4 + Math.random() * 1.6);
       spark.position.copy(point);
@@ -9492,11 +9614,10 @@ function emitLandingSparks(impact, airborneTime, groundNormal) {
         .addScaledVector(normalVector, 1.7 + Math.random() * 3.2);
       spark.userData.velocity.y += 0.35 + Math.random() * 1.25;
       wallSparkParticles.push(spark);
-      scene.add(spark);
     }
   }
 
-  trimEffectArray(wallSparkParticles, 420);
+  trimWallSparkParticles();
 }
 
 function updateWallSparks(delta) {
@@ -9509,9 +9630,8 @@ function updateWallSparks(delta) {
     spark.material.opacity = Math.max(0, spark.userData.life / spark.userData.maxLife);
 
     if (spark.userData.life <= 0) {
-      scene.remove(spark);
-      spark.material.dispose();
       wallSparkParticles.splice(i, 1);
+      releaseWallSpark(spark);
     }
   }
 }
@@ -10483,8 +10603,7 @@ function resetCar(gridSlot = raceSession.gridSlot ?? 0, gridTotal = raceSession.
     puff.material.dispose();
   }
   for (const spark of wallSparkParticles.splice(0)) {
-    scene.remove(spark);
-    spark.material.dispose();
+    releaseWallSpark(spark);
   }
   for (const mark of tireMarkSegments.splice(0)) {
     disposeEffectMesh(mark);
