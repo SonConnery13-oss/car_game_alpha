@@ -1618,6 +1618,7 @@ function createMountainGuardRails() {
     if (!side.enabled) continue;
 
     for (let i = 0; i < segmentLimit;) {
+      const startIndex = i;
       const currentStep = getAdaptiveTracksideSegmentStep(i, segmentStep, railSettings.minSegmentStep ?? 1);
       const nextIndex = activeCourse.loop
         ? (i + currentStep) % trackPoints.length
@@ -1640,7 +1641,7 @@ function createMountainGuardRails() {
       addRailMatrix(railMatrices, centerX, groundY + 0.96, centerZ, angle, length);
       addRailMatrix(railMatrices, centerX, groundY + 0.56, centerZ, angle, length * 0.98);
 
-      if (i % postStep === 0) {
+      if (startIndex % postStep === 0) {
         addPostMatrix(postMatrices, a.x, getTrackElevation(a.x, a.y) + 0.58, a.y, angle);
       }
 
@@ -1697,7 +1698,9 @@ function createGuardRailCollision(centerX, centerY, centerZ, angle, length) {
 
 function getGuardRailSegment(index, nextIndex, side, baseOffset, railSettings = {}) {
   const clearance = Math.max(getRoadWidthAtIndex(index), getRoadWidthAtIndex(nextIndex)) / 2 + 0.9;
-  const pushSteps = railSettings.clearancePushSteps ?? [0, 2, 4, 7, 11, 16, 24, 34, 48, 66, 88, 116, 152, 196, 248];
+  const maxPush = railSettings.maxClearancePush ?? (isGrandPrixCircuitProfile() ? 38 : 152);
+  const pushSteps = (railSettings.clearancePushSteps ?? [0, 2, 4, 7, 11, 16, 24, 34, 48, 66, 88, 116, 152, 196, 248])
+    .filter((push) => push <= maxPush);
   let bestSegment = null;
   let bestDistance = -Infinity;
 
@@ -1741,8 +1744,8 @@ function getAdaptiveTracksideSegmentStep(index, preferredStep = 4, minStep = 1) 
   if (step <= minStep) return step;
 
   const curvature = getTrackCurvature(index);
-  if (curvature > 0.34) return Math.max(1, Math.floor(minStep));
-  if (curvature > 0.18) return Math.max(1, Math.floor(step * 0.5));
+  if (curvature > 0.2) return Math.max(1, Math.floor(minStep));
+  if (curvature > 0.08) return Math.max(1, Math.floor(step * 0.5));
   return step;
 }
 
@@ -2293,6 +2296,7 @@ function createMonacoTracksideBuildings() {
 
   const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x303234, roughness: 0.82 });
   const trimMaterial = new THREE.MeshStandardMaterial({ color: 0xf3efe2, roughness: 0.64 });
+  const facadeMaterials = new Map();
 
   for (const zone of zones) {
     const sides = zone.sides ?? [zone.side ?? 1];
@@ -2309,11 +2313,16 @@ function createMonacoTracksideBuildings() {
       const depth = (zone.depth ?? 13) * (0.88 + pseudoRandom(index * 2.4) * 0.3);
       const height = (zone.minHeight ?? 14) + pseudoRandom(index * 3.2) * ((zone.maxHeight ?? 34) - (zone.minHeight ?? 14));
       const color = zone.colors?.[Math.floor(seed * zone.colors.length) % zone.colors.length] ?? 0xd7d1c0;
-      const facadeMaterial = new THREE.MeshStandardMaterial({
-        map: makeBuildingTexture(color, zone.windowColor ?? 0xcfe7f1),
-        roughness: 0.7,
-        metalness: 0.02,
-      });
+      const materialKey = `${color}:${zone.windowColor ?? 0xcfe7f1}`;
+      let facadeMaterial = facadeMaterials.get(materialKey);
+      if (!facadeMaterial) {
+        facadeMaterial = new THREE.MeshStandardMaterial({
+          map: makeBuildingTexture(color, zone.windowColor ?? 0xcfe7f1),
+          roughness: 0.7,
+          metalness: 0.02,
+        });
+        facadeMaterials.set(materialKey, facadeMaterial);
+      }
 
       for (const side of sides) {
         const offset = zone.offset ?? getRoadsideObjectOffset(depth * 0.5 + 5.5);
@@ -2550,7 +2559,7 @@ function createSpaTireBarriers() {
 
       for (let row = 0; row < (zone.rows ?? 2); row += 1) {
         const offset = ROAD_WIDTH / 2 + (activeCourse.shoulderWidth ?? 6) + 3.5 + row * 0.9;
-        const base = point.clone().addScaledVector(normal, side * offset);
+        const base = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(side * offset, index));
         const y = getTrackElevation(base.x, base.y) + 0.42 + row * 0.08;
         tireMatrices.push(makeTransformMatrix(base.x, y, base.y, yaw, 1, 1, 1));
         if ((index + row) % 2 === 0) stripeMatrices.push(makeTransformMatrix(base.x, y + 0.05, base.y, yaw, 1, 1, 1));
@@ -2580,10 +2589,10 @@ function createSpaFacilities() {
     const centerOffset = Number.isFinite(zone.offset)
       ? zone.offset
       : getRoadsideObjectOffset(facilityDepth * 0.5 + 8.5);
-    const base = point.clone().addScaledVector(normal, side * centerOffset);
+    const base = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(side * centerOffset, index));
     const groundY = getTrackElevation(base.x, base.y);
     if (
-      !isRoadsideObjectClear(base.x, base.y, facilityDepth * 0.5, 0.8) ||
+      !isTracksidePlacementClear(base, index, facilityDepth * 0.5, 0.8) ||
       !isRectFootprintClearOfTrack(base.x, base.y, facilityLength, facilityDepth, yaw, 3.0)
     ) {
       continue;
@@ -2737,9 +2746,14 @@ function createCircuitMarshalPosts() {
     const tangent = getTrackTangent(index);
     const side = post.side ?? 1;
     const offset = post.offset ?? getRoadsideObjectOffset(activeCourse.visualProfile === "monacoStreet" ? 2.4 : 7.5);
-    const base = point.clone().addScaledVector(normal, side * offset);
+    const base = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(side * offset, index));
     const yaw = Math.atan2(tangent.x, tangent.y);
-    if (!isRectFootprintClearOfTrack(base.x, base.y, 3.2, 2.2, yaw, activeCourse.visualProfile === "monacoStreet" ? 0.65 : 1.6)) continue;
+    if (
+      !isTracksidePlacementClear(base, index, 1.8, activeCourse.visualProfile === "monacoStreet" ? 0.3 : 0.8) ||
+      !isRectFootprintClearOfTrack(base.x, base.y, 3.2, 2.2, yaw, activeCourse.visualProfile === "monacoStreet" ? 0.65 : 1.6)
+    ) {
+      continue;
+    }
 
     const y = getTrackElevation(base.x, base.y);
     const hut = new THREE.Group();
@@ -2783,8 +2797,8 @@ function createCircuitLightTowers() {
     const tangent = getTrackTangent(index);
     const side = tower.side ?? 1;
     const offset = tower.offset ?? getRoadsideObjectOffset(tower.extra ?? 16);
-    const base = point.clone().addScaledVector(normal, side * offset);
-    if (!isRoadsideObjectClear(base.x, base.y, 1.8, 0.8)) continue;
+    const base = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(side * offset, index));
+    if (!isTracksidePlacementClear(base, index, 1.8, 0.8)) continue;
 
     const height = tower.height ?? 13.5;
     const yaw = Math.atan2(tangent.x, tangent.y);
@@ -2832,8 +2846,14 @@ function createCourseAdBoards() {
     const tangent = getTrackTangent(index);
     const side = board.side ?? 1;
     const offset = getRoadsideObjectOffset(board.offset ?? 3.6);
-    const base = point.clone().addScaledVector(normal, side * offset);
-    if (!isRoadsideObjectClear(base.x, base.y, 1.8, 0.3)) continue;
+    const base = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(side * offset, index));
+    const yaw = Math.atan2((-normal.x * side), (-normal.y * side)) + (activeCourse.adBoardYawOffset ?? 0);
+    if (
+      !isTracksidePlacementClear(base, index, 2.4, 0.6) ||
+      !isRectFootprintClearOfTrack(base.x, base.y, 5.2, 1.2, yaw, 2.2)
+    ) {
+      continue;
+    }
 
     const boardMaterial = new THREE.MeshBasicMaterial({
       map: makeTrackSignTexture(
@@ -2846,7 +2866,6 @@ function createCourseAdBoards() {
     });
     const postMaterial = new THREE.MeshStandardMaterial({ color: 0x646a68, roughness: 0.48, metalness: 0.38 });
     const groundY = getTrackElevation(base.x, base.y);
-    const yaw = Math.atan2((-normal.x * side), (-normal.y * side)) + (activeCourse.adBoardYawOffset ?? 0);
 
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 1.38), boardMaterial);
     panel.position.set(base.x, groundY + 2.2, base.y);
@@ -2895,9 +2914,21 @@ function createCourseGantries() {
       ),
     });
 
+    let postsClear = true;
+    const postBases = [];
+
     for (const side of [-1, 1]) {
-      const base = point.clone().addScaledVector(normal, side * postOffset);
-      const groundY = getTrackElevation(base.x, base.y);
+      const base = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(side * postOffset, index));
+      if (!isTracksidePlacementClear(base, index, 0.8, 0.6)) {
+        postsClear = false;
+        break;
+      }
+      postBases.push({ side, base, groundY: getTrackElevation(base.x, base.y) });
+    }
+
+    if (!postsClear) continue;
+
+    for (const { base, groundY } of postBases) {
       const post = new THREE.Mesh(postGeometry, postMaterial);
       post.position.set(base.x, groundY + height / 2, base.y);
       post.castShadow = true;
@@ -3191,6 +3222,7 @@ function createMountainTrees() {
   const rows = vegetation.rows ?? 1;
   const rowSpacing = vegetation.rowSpacing ?? Math.max(14, farOffset * 0.45);
   const farDensityScale = vegetation.farDensityScale ?? 0.62;
+  const castTreeShadows = vegetation.castShadows !== false;
   const colors = vegetation.colors ?? [0x254f2f, 0x2f6739, 0x406f38];
   const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x5b3e24, roughness: 0.82 });
   const trunkGeometry = new THREE.CylinderGeometry(1, 1, 1, 8);
@@ -3209,13 +3241,13 @@ function createMountainTrees() {
         if (seed > rowDensity) continue;
 
         const offset = ROAD_WIDTH / 2 + nearOffset + row * rowSpacing + pseudoRandom(i * 9.2 + side * 3.4 + row) * farOffset;
-        const base = point.clone().addScaledVector(normal, side * offset);
+        const base = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(side * offset, i));
         const height = (5.2 + pseudoRandom(i * 4.1 + side + row) * 3.6) * (vegetation.heightScale ?? 1);
         const yaw = seed * Math.PI * 2;
         const trunkRadius = 0.16 + seed * 0.08;
         const leafRadius = 1.25 + seed * 0.7 + row * 0.12;
         const colorIndex = Math.floor(seed * colors.length) % colors.length;
-        if (!isRoadsideObjectClear(base.x, base.y, leafRadius, 1.1)) continue;
+        if (!isTracksidePlacementClear(base, i, leafRadius, 1.1)) continue;
 
         const baseY = getTrackElevation(base.x, base.y);
 
@@ -3241,14 +3273,14 @@ function createMountainTrees() {
     }
   }
 
-  addInstancedMesh(trunkGeometry, trunkMaterial, trunkMatrices, true);
+  addInstancedMesh(trunkGeometry, trunkMaterial, trunkMatrices, castTreeShadows);
 
   for (let colorIndex = 0; colorIndex < colors.length; colorIndex += 1) {
     addInstancedMesh(
       leafGeometry,
       new THREE.MeshStandardMaterial({ color: colors[colorIndex], roughness: 0.9 }),
       leafMatricesByColor[colorIndex],
-      true,
+      castTreeShadows,
     );
   }
 }
@@ -5876,6 +5908,18 @@ function getRoadsideObjectOffset(extra = 0) {
 
 function isRoadsideObjectClear(x, z, radius = 0, buffer = 0.8) {
   return !isNearTrack(x, z, getRoadsideObjectOffset(radius + buffer));
+}
+
+function isTracksidePlacementClear(point, intendedIndex, radius = 0, buffer = 0.8) {
+  if (!point) return false;
+  if (!isRoadsideObjectClear(point.x, point.y, radius, buffer)) return false;
+
+  const nearest = getNearestTrackInfo(point.x, point.y);
+  const nearestDistance = Math.sqrt(nearest.distanceSquared);
+  const localDistance = getWrappedIndexDistance(nearest.index, intendedIndex, trackPoints.length);
+  const branchClearance = getRoadWidthAtIndex(nearest.index) / 2 + radius + buffer;
+
+  return localDistance < 44 || nearestDistance >= branchClearance;
 }
 
 function isRectFootprintClearOfTrack(x, z, width, depth, yaw = 0, buffer = 1.2) {

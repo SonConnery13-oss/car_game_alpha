@@ -148,11 +148,11 @@ export const MAP_MONACO = {
     { fraction: 0.9, side: 1, label: "Rascasse", width: 22, height: 18, depth: 16, color: 0xc35b45 },
   ],
   tracksideBuildings: [
-    { start: 0.0, end: 0.16, sides: [-1, 1], offset: 14.8, step: 14, width: 15, depth: 12, minHeight: 22, maxHeight: 46, clearance: 0.7, colors: [0xd6d5c8, 0xc9d2cf, 0xe2ddcc], windowColor: 0x9ec7d8 },
-    { start: 0.16, end: 0.34, sides: [-1, 1], offset: 15.6, step: 14, width: 17, depth: 13, minHeight: 24, maxHeight: 52, clearance: 0.75, colors: [0xd8c5a4, 0xddd7c7, 0xcfc5b6], windowColor: 0xb6d8e7 },
-    { start: 0.34, end: 0.54, sides: [-1, 1], offset: 14.2, step: 12, width: 13, depth: 11, minHeight: 24, maxHeight: 48, clearance: 0.65, colors: [0xe7e0d0, 0xd2c7b5, 0xbfc3bd], windowColor: 0x9fc5d6 },
-    { start: 0.54, end: 0.72, sides: [1], offset: 15.4, step: 15, width: 14, depth: 11, minHeight: 18, maxHeight: 36, clearance: 0.7, colors: [0xc9c4b9, 0xd9d1bd], windowColor: 0xa7cad8 },
-    { start: 0.72, end: 1.0, sides: [-1, 1], offset: 14.5, step: 12, width: 13, depth: 11, minHeight: 18, maxHeight: 40, clearance: 0.65, colors: [0xc7b29a, 0xd9d0bf, 0xbfc5c1], windowColor: 0x9fc8da },
+    { start: 0.0, end: 0.16, sides: [-1, 1], offset: 14.8, step: 18, width: 15, depth: 12, minHeight: 22, maxHeight: 46, clearance: 0.7, colors: [0xd6d5c8, 0xc9d2cf, 0xe2ddcc], windowColor: 0x9ec7d8 },
+    { start: 0.16, end: 0.34, sides: [-1, 1], offset: 15.6, step: 18, width: 17, depth: 13, minHeight: 24, maxHeight: 52, clearance: 0.75, colors: [0xd8c5a4, 0xddd7c7, 0xcfc5b6], windowColor: 0xb6d8e7 },
+    { start: 0.34, end: 0.54, sides: [-1, 1], offset: 14.2, step: 16, width: 13, depth: 11, minHeight: 24, maxHeight: 48, clearance: 0.65, colors: [0xe7e0d0, 0xd2c7b5, 0xbfc3bd], windowColor: 0x9fc5d6 },
+    { start: 0.54, end: 0.72, sides: [1], offset: 15.4, step: 18, width: 14, depth: 11, minHeight: 18, maxHeight: 36, clearance: 0.7, colors: [0xc9c4b9, 0xd9d1bd], windowColor: 0xa7cad8 },
+    { start: 0.72, end: 1.0, sides: [-1, 1], offset: 14.5, step: 16, width: 13, depth: 11, minHeight: 18, maxHeight: 40, clearance: 0.65, colors: [0xc7b29a, 0xd9d0bf, 0xbfc5c1], windowColor: 0x9fc8da },
   ],
   yachtSections: [
     { start: 0.67, end: 0.77, side: -1, count: 4 },
