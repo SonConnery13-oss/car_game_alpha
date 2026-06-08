@@ -1696,7 +1696,7 @@ function addInstancedMesh(geometry, material, matrices, castShadow = false) {
 
 function createGuardRailCollisionLoops(sides, offset, railSettings = {}) {
   const visualStep = railSettings.segmentStep ?? 4;
-  const collisionStep = railSettings.collisionStep ?? Math.max(visualStep, isGrandPrixCircuitProfile() ? 4 : 7);
+  const collisionStep = railSettings.collisionStep ?? visualStep;
   const minStep = railSettings.collisionMinSegmentStep ?? Math.max(1, Math.min(visualStep, 2));
   const segmentLimit = activeCourse.loop ? trackPoints.length : trackPoints.length - 1;
 
@@ -1737,28 +1737,72 @@ function createGuardRailCollision(centerX, centerY, centerZ, angle, length) {
 }
 
 function getGuardRailSegment(index, nextIndex, side, baseOffset, railSettings = {}) {
-  const clearance = Math.max(getRoadWidthAtIndex(index), getRoadWidthAtIndex(nextIndex)) / 2 + 0.9;
+  const edgeClearance = railSettings.minRoadEdgeClearance ?? 0.58;
+  const branchClearance = Math.max(getRoadWidthAtIndex(index), getRoadWidthAtIndex(nextIndex)) / 2 + edgeClearance;
   const maxPush = railSettings.maxClearancePush ?? (isGrandPrixCircuitProfile() ? 38 : 152);
-  const pushSteps = (railSettings.clearancePushSteps ?? [0, 2, 4, 7, 11, 16, 24, 34, 48, 66, 88, 116, 152, 196, 248])
+  let pushSteps = (railSettings.clearancePushSteps ?? [0, 2, 4, 7, 11, 16, 24, 34, 48, 66, 88, 116, 152, 196, 248])
     .filter((push) => push <= maxPush);
+  if (!pushSteps.some((push) => Math.abs(push) < 0.001)) {
+    pushSteps = [0, ...pushSteps];
+  }
+
   let bestSegment = null;
-  let bestDistance = -Infinity;
+  let bestScore = -Infinity;
 
   for (const push of pushSteps) {
     const offset = side * (baseOffset + push);
     const a = getOffsetTrackPoint(index, getRoadEdgeAwareOffset(offset, index));
     const b = getOffsetTrackPoint(nextIndex, getRoadEdgeAwareOffset(offset, nextIndex));
-    const distance = getTrackCorridorDistanceForSegment(a, b, index, nextIndex);
+    const branchDistance = getTrackCorridorDistanceForSegment(a, b, index, nextIndex);
+    const localEdgeClearance = getLocalRoadEdgeClearanceForSegment(a, b, index, nextIndex, railSettings);
+    const score = Math.min(branchDistance - branchClearance, localEdgeClearance - edgeClearance);
 
-    if (distance > bestDistance) {
-      bestDistance = distance;
+    if (score > bestScore) {
+      bestScore = score;
       bestSegment = { a, b };
     }
 
-    if (distance >= clearance) return { a, b };
+    if (score >= 0) return { a, b };
   }
 
-  return bestDistance >= clearance ? bestSegment : null;
+  return bestScore >= 0 ? bestSegment : null;
+}
+
+function getLocalRoadEdgeClearanceForSegment(start, end, startIndex, endIndex, railSettings = {}) {
+  if (!start || !end) return -Infinity;
+
+  const forwardDistance = Math.max(1, getForwardTrackIndexDistance(startIndex, endIndex));
+  const margin = railSettings.localClearanceMargin ?? 0;
+  const samples = Math.max(3, railSettings.localClearanceSamples ?? 14);
+  const span = forwardDistance + margin * 2;
+  let minClearance = Infinity;
+
+  for (let i = 0; i < samples; i += 1) {
+    const offset = Math.round(-margin + (span * i) / Math.max(samples - 1, 1));
+    const sampleIndex = getTrackIndexWithOffset(startIndex, offset);
+    if (sampleIndex === null) continue;
+
+    const centerPoint = trackPoints[sampleIndex];
+    const centerDistance = getPointToSegmentDistance(centerPoint, start, end);
+    minClearance = Math.min(minClearance, centerDistance - getRoadWidthAtIndex(sampleIndex) / 2);
+  }
+
+  return minClearance;
+}
+
+function getForwardTrackIndexDistance(startIndex, endIndex) {
+  const start = normalizeTrackIndex(startIndex);
+  const end = normalizeTrackIndex(endIndex ?? startIndex);
+
+  if (!activeCourse.loop) return Math.max(0, end - start);
+  return (end - start + trackPoints.length) % trackPoints.length;
+}
+
+function getTrackIndexWithOffset(index, offset) {
+  const rawIndex = Math.round(index + offset);
+  if (activeCourse.loop) return normalizeTrackIndex(rawIndex);
+  if (rawIndex < 0 || rawIndex >= trackPoints.length) return null;
+  return rawIndex;
 }
 
 function createLowWallLoop(offset, material, options = {}) {
@@ -8095,6 +8139,7 @@ function updateSelectedCourseUi() {
 }
 
 function getCourseMetaLabel(course) {
+  if (course.cornerLabel) return `${course.distanceLabel} / ${course.cornerLabel}`;
   return course.turnCount ? `${course.distanceLabel} / ${course.turnCount} turns` : course.distanceLabel;
 }
 
