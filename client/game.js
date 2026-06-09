@@ -130,6 +130,7 @@ const BRIDGE_ROUTES = [
   { startX: 72, startZ: 98, endX: 58, endZ: TEST_AREA.z - TEST_AREA.depth / 2 - 1, width: 9.5 },
 ];
 const TRACK_SURFACE_OFFSET = 0.065;
+const ASPHALT_TEXTURE_URL = "./assets/textures/asphalt-reference.png";
 const MAX_FORWARD_SPEED = 200 / 3.6;
 const STEERING_INPUT_RESPONSE = {
   keyboard: 2.25,
@@ -11100,6 +11101,24 @@ function makeLicensePlateTexture(text) {
 }
 
 function makeAsphaltTexture(options = {}) {
+  if (options.procedural !== true) {
+    const texture = new THREE.TextureLoader().load(options.textureUrl ?? ASPHALT_TEXTURE_URL);
+    configureRepeatingTexture(texture, options.anisotropy ?? 10);
+    return texture;
+  }
+
+  return makeProceduralAsphaltTexture(options);
+}
+
+function configureRepeatingTexture(texture, anisotropy = 8) {
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = anisotropy;
+  return texture;
+}
+
+function makeProceduralAsphaltTexture(options = {}) {
   const canvas = document.createElement("canvas");
   canvas.width = 256;
   canvas.height = 256;
@@ -11150,11 +11169,7 @@ function makeAsphaltTexture(options = {}) {
   }
 
   const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.anisotropy = 8;
-  return texture;
+  return configureRepeatingTexture(texture, 8);
 }
 
 function makeRoadShoulderTexture(options = {}) {
