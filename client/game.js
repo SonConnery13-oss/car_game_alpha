@@ -1638,7 +1638,7 @@ function createMountainGuardRails() {
       const { a, b } = segment;
       const dx = b.x - a.x;
       const dz = b.y - a.y;
-      const length = Math.hypot(dx, dz) + 0.18;
+      const length = Math.hypot(dx, dz) + (railSettings.segmentOverlap ?? 0.18);
       if (length < 1) continue;
 
       const angle = Math.atan2(-dz, dx);
@@ -1647,7 +1647,7 @@ function createMountainGuardRails() {
       const groundY = (getTrackElevation(a.x, a.y) + getTrackElevation(b.x, b.y)) / 2;
 
       addRailMatrix(railMatrices, centerX, groundY + 0.96, centerZ, angle, length);
-      addRailMatrix(railMatrices, centerX, groundY + 0.56, centerZ, angle, length * 0.98);
+      addRailMatrix(railMatrices, centerX, groundY + 0.56, centerZ, angle, length * (railSettings.lowerRailScale ?? 0.98));
 
       if (startIndex % postStep === 0) {
         addPostMatrix(postMatrices, a.x, getTrackElevation(a.x, a.y) + 0.58, a.y, angle);
