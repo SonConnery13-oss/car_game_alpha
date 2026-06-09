@@ -1696,8 +1696,9 @@ function addInstancedMesh(geometry, material, matrices, castShadow = false) {
 
 function createGuardRailCollisionLoops(sides, offset, railSettings = {}) {
   const visualStep = railSettings.segmentStep ?? 4;
-  const collisionStep = railSettings.collisionStep ?? visualStep;
-  const minStep = railSettings.collisionMinSegmentStep ?? Math.max(1, Math.min(visualStep, 2));
+  const minimumCollisionStep = railSettings.minimumCollisionStep ?? (isGrandPrixCircuitProfile() ? 3 : 4);
+  const collisionStep = Math.max(railSettings.collisionStep ?? visualStep, minimumCollisionStep);
+  const minStep = railSettings.collisionMinSegmentStep ?? Math.max(2, Math.min(collisionStep, 3));
   const segmentLimit = activeCourse.loop ? trackPoints.length : trackPoints.length - 1;
 
   for (const side of sides) {
@@ -5604,8 +5605,14 @@ function createMiniMapState() {
       (height - padding * 2) / Math.max(maxZ - minZ, 1),
     ) * (activeCourse.miniMapScale ?? 1);
 
-  return {
+  const staticCanvas = document.createElement("canvas");
+  staticCanvas.width = width;
+  staticCanvas.height = height;
+
+  const state = {
     context: miniMapCanvas.getContext("2d"),
+    staticCanvas,
+    staticContext: staticCanvas.getContext("2d"),
     width,
     height,
     scale,
@@ -5613,6 +5620,9 @@ function createMiniMapState() {
     centerZ: (minZ + maxZ) * 0.5,
     checkpointIndices: getCheckpointIndices(),
   };
+
+  renderMiniMapStaticLayer(state);
+  return state;
 }
 
 function updateMiniMap() {
@@ -5620,24 +5630,35 @@ function updateMiniMap() {
 
   const context = miniMapState.context;
   context.clearRect(0, 0, miniMapState.width, miniMapState.height);
-  context.lineCap = "round";
-  context.lineJoin = "round";
-
-  drawMiniMapTrack(context, 12, "rgba(13, 19, 16, 0.84)");
-  drawMiniMapTrack(context, 7, "rgba(238, 242, 231, 0.9)");
-  if (!drawMiniMapSectors(context, 4)) {
-    drawMiniMapTrack(context, 4, "rgba(54, 78, 36, 0.94)");
+  if (miniMapState.staticCanvas) {
+    context.drawImage(miniMapState.staticCanvas, 0, 0);
+  } else {
+    renderMiniMapStaticLayer(miniMapState, context);
   }
-  drawMiniMapTrack(context, 2.2, "rgba(30, 32, 30, 0.96)");
-  drawMiniMapCheckpoints(context);
   drawMiniMapRemotePlayers(context);
   drawMiniMapCar(context);
 }
 
-function drawMiniMapTrack(context, width, color) {
+function renderMiniMapStaticLayer(state = miniMapState, targetContext = state?.staticContext) {
+  if (!state || !targetContext) return;
+
+  targetContext.clearRect(0, 0, state.width, state.height);
+  targetContext.lineCap = "round";
+  targetContext.lineJoin = "round";
+
+  drawMiniMapTrack(targetContext, 12, "rgba(13, 19, 16, 0.84)", state);
+  drawMiniMapTrack(targetContext, 7, "rgba(238, 242, 231, 0.9)", state);
+  if (!drawMiniMapSectors(targetContext, 4, state)) {
+    drawMiniMapTrack(targetContext, 4, "rgba(54, 78, 36, 0.94)", state);
+  }
+  drawMiniMapTrack(targetContext, 2.2, "rgba(30, 32, 30, 0.96)", state);
+  drawMiniMapCheckpoints(targetContext, state);
+}
+
+function drawMiniMapTrack(context, width, color, state = miniMapState) {
   context.beginPath();
   trackPoints.forEach((point, index) => {
-    const mapped = mapToMiniMap(point.x, point.y);
+    const mapped = mapToMiniMap(point.x, point.y, state);
     if (index === 0) context.moveTo(mapped.x, mapped.y);
     else context.lineTo(mapped.x, mapped.y);
   });
@@ -5646,8 +5667,8 @@ function drawMiniMapTrack(context, width, color) {
   context.stroke();
 }
 
-function drawMiniMapSectors(context, width) {
-  return drawCourseSectors(context, trackPoints, activeCourse, (point) => mapToMiniMap(point.x, point.y), width);
+function drawMiniMapSectors(context, width, state = miniMapState) {
+  return drawCourseSectors(context, trackPoints, activeCourse, (point) => mapToMiniMap(point.x, point.y, state), width);
 }
 
 function drawCourseSectors(context, points, course, mapPoint, width) {
@@ -5694,14 +5715,14 @@ function drawTrackFractionRange(context, points, mapPoint, start, end, width, co
   context.stroke();
 }
 
-function drawMiniMapCheckpoints(context) {
-  const start = mapToMiniMap(START_GATE.center.x, START_GATE.center.y);
-  const finish = mapToMiniMap(FINISH_GATE.center.x, FINISH_GATE.center.y);
+function drawMiniMapCheckpoints(context, state = miniMapState) {
+  const start = mapToMiniMap(START_GATE.center.x, START_GATE.center.y, state);
+  const finish = mapToMiniMap(FINISH_GATE.center.x, FINISH_GATE.center.y, state);
 
   context.fillStyle = "#d3202a";
-  for (const index of miniMapState.checkpointIndices) {
+  for (const index of state.checkpointIndices) {
     const point = trackPoints[index];
-    const mapped = mapToMiniMap(point.x, point.y);
+    const mapped = mapToMiniMap(point.x, point.y, state);
     context.beginPath();
     context.arc(mapped.x, mapped.y, 3.4, 0, Math.PI * 2);
     context.fill();
@@ -5780,10 +5801,10 @@ function getMiniMapPlayerLabel(displayName) {
   return label.length > 8 ? `${label.slice(0, 7)}.` : label;
 }
 
-function mapToMiniMap(x, z) {
+function mapToMiniMap(x, z, state = miniMapState) {
   return {
-    x: miniMapState.width * 0.5 + (x - miniMapState.centerX) * miniMapState.scale,
-    y: miniMapState.height * 0.5 + (z - miniMapState.centerZ) * miniMapState.scale,
+    x: state.width * 0.5 + (x - state.centerX) * state.scale,
+    y: state.height * 0.5 + (z - state.centerZ) * state.scale,
   };
 }
 
