@@ -373,10 +373,10 @@ const world = new CANNON.World({
 });
 world.broadphase = new CANNON.SAPBroadphase(world);
 world.allowSleep = true;
-world.solver.iterations = 12;
-world.solver.tolerance = 0.001;
-world.quatNormalizeSkip = 0;
-world.quatNormalizeFast = false;
+world.solver.iterations = 10;
+world.solver.tolerance = 0.0015;
+world.quatNormalizeSkip = 2;
+world.quatNormalizeFast = true;
 world.defaultContactMaterial.friction = 0.45;
 world.defaultContactMaterial.restitution = 0;
 
@@ -1304,7 +1304,9 @@ function createTrack() {
 }
 
 function createRoadShoulders() {
-  const shoulderWidth = activeCourse.shoulderWidth ?? 4.5;
+  const shoulderWidth = getConfiguredShoulderWidth();
+  if (shoulderWidth <= 0.05) return;
+
   const shoulderTexture = activeCourse.asphaltShoulders
     ? makeAsphaltTexture(activeCourse.asphalt)
     : makeRoadShoulderTexture(activeCourse.shoulder);
@@ -1339,16 +1341,23 @@ function createRoadShoulders() {
     shoulder.renderOrder = 1;
     scene.add(shoulder);
 
-    const raggedEdge = createRibbonMesh(
-      0.32,
-      TRACK_SURFACE_OFFSET + 0.12,
-      roughEdgeMaterial,
-      side * (ROAD_WIDTH / 2 + 0.28),
-      1,
-    );
-    raggedEdge.renderOrder = 7;
-    scene.add(raggedEdge);
+    if (activeCourse.disableRaggedRoadEdge !== true) {
+      const raggedEdge = createRibbonMesh(
+        0.32,
+        TRACK_SURFACE_OFFSET + 0.12,
+        roughEdgeMaterial,
+        side * (ROAD_WIDTH / 2 + 0.28),
+        1,
+      );
+      raggedEdge.renderOrder = 7;
+      scene.add(raggedEdge);
+    }
   }
+}
+
+function getConfiguredShoulderWidth() {
+  if (activeCourse.disableRoadShoulders === true) return 0;
+  return activeCourse.shoulderWidth ?? 4.5;
 }
 
 function createCenterLaneMarks() {
@@ -6058,7 +6067,7 @@ function isNearTrack(x, z, margin) {
 }
 
 function getRoadsideObjectOffset(extra = 0) {
-  const shoulderWidth = activeCourse.environment === "mountain" ? activeCourse.shoulderWidth ?? 4.5 : 0;
+  const shoulderWidth = activeCourse.environment === "mountain" ? getConfiguredShoulderWidth() : 0;
   return ROAD_WIDTH / 2 + shoulderWidth + extra;
 }
 
@@ -6111,7 +6120,7 @@ function getSurfaceGripAt(x, z) {
   const nearest = getNearestTrackInfo(x, z);
   const distance = Math.sqrt(nearest.distanceSquared);
   const asphaltEdge = getRoadWidthAtIndex(nearest.index) / 2;
-  const shoulderEdge = asphaltEdge + (activeCourse.shoulderWidth ?? 4.5);
+  const shoulderEdge = asphaltEdge + getConfiguredShoulderWidth();
   const progress = nearest.index / Math.max(trackPoints.length - 1, 1);
   const runoff = getRunoffZoneAt(progress, distance);
 
@@ -6167,7 +6176,7 @@ function getRunoffZoneAt(progress, distance) {
   for (const zone of activeCourse.runoffZones ?? []) {
     if (!isProgressInRange(progress, zone.start, zone.end)) continue;
 
-    const center = zone.offset ?? ROAD_WIDTH / 2 + (activeCourse.shoulderWidth ?? 5);
+    const center = zone.offset ?? ROAD_WIDTH / 2 + getConfiguredShoulderWidth();
     const halfWidth = (zone.width ?? 8) / 2;
     if (distance >= center - halfWidth && distance <= center + halfWidth) return zone;
   }
