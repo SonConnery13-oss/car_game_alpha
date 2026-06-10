@@ -1296,6 +1296,9 @@ function createTrack() {
   if (activeCourse.environment === "mountain") {
     createCenterLaneMarks();
     createTireWearMarks();
+    if (activeCourse.racingLine?.enabled) {
+      createRacingLine();
+    }
   } else if (activeCourse.visualProfile === "monacoStreet") {
     createStreetLaneMarks();
   } else {
@@ -1467,27 +1470,28 @@ function getTrackCurvature(index) {
 }
 
 function createRacingLine() {
+  const settings = activeCourse.racingLine ?? {};
   const lineMaterial = new THREE.MeshBasicMaterial({
-    color: 0xe02e28,
+    color: settings.color ?? 0xe02e28,
     transparent: true,
-    opacity: 0.72,
+    opacity: settings.opacity ?? 0.72,
+    side: THREE.DoubleSide,
     polygonOffset: true,
     polygonOffsetFactor: -6,
     polygonOffsetUnits: -6,
   });
+  const frequency = settings.frequency ?? 6;
+  const amplitude = settings.amplitude ?? 1.15;
+  const line = createSurfacePaintRibbonMesh(
+    settings.width ?? 0.34,
+    TRACK_SURFACE_OFFSET + (settings.surfaceLift ?? 0.012),
+    lineMaterial,
+    (i) => Math.sin((i / trackPoints.length) * Math.PI * frequency) * amplitude,
+    settings.crossSegments ?? 2,
+  );
 
-  for (let i = 0; i < trackPoints.length; i += 5) {
-    const point = trackPoints[i];
-    const normal = getTrackNormal(i);
-    const tangent = getTrackTangent(i);
-    const offset = Math.sin((i / trackPoints.length) * Math.PI * 6) * 1.15;
-    const center = point.clone().addScaledVector(normal, offset);
-    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.024, 2.65), lineMaterial);
-    dash.position.set(center.x, getTrackElevation(center.x, center.y) + TRACK_SURFACE_OFFSET + 0.13, center.y);
-    dash.rotation.y = Math.atan2(tangent.x, tangent.y);
-    dash.renderOrder = 6;
-    scene.add(dash);
-  }
+  line.renderOrder = 6;
+  scene.add(line);
 }
 
 function createLaneMarkers() {
@@ -1637,7 +1641,7 @@ function createMountainGuardRails() {
 
     for (let i = 0; i < segmentLimit;) {
       const startIndex = i;
-      const currentStep = getAdaptiveTracksideSegmentStep(i, segmentStep, railSettings.minSegmentStep ?? 1);
+      const currentStep = getAdaptiveTracksideSegmentStep(i, segmentStep, railSettings.minSegmentStep ?? 1, railSettings);
       const nextIndex = activeCourse.loop
         ? (i + currentStep) % trackPoints.length
         : Math.min(i + currentStep, trackPoints.length - 1);
@@ -1706,16 +1710,24 @@ function addInstancedMesh(geometry, material, matrices, castShadow = false) {
 
 function createGuardRailCollisionLoops(sides, offset, railSettings = {}) {
   const visualStep = railSettings.segmentStep ?? 4;
-  const minimumCollisionStep = railSettings.minimumCollisionStep ?? (isGrandPrixCircuitProfile() ? 3 : 4);
-  const collisionStep = Math.max(railSettings.collisionStep ?? visualStep, minimumCollisionStep);
-  const minStep = railSettings.collisionMinSegmentStep ?? Math.max(2, Math.min(collisionStep, 3));
+  const matchesVisual = railSettings.collisionMatchesVisual === true;
+  const minimumCollisionStep = matchesVisual ? 1 : railSettings.minimumCollisionStep ?? (isGrandPrixCircuitProfile() ? 3 : 4);
+  const collisionStep = matchesVisual
+    ? visualStep
+    : Math.max(railSettings.collisionStep ?? visualStep, minimumCollisionStep);
+  const minStep = matchesVisual
+    ? railSettings.minSegmentStep ?? 1
+    : railSettings.collisionMinSegmentStep ?? Math.max(2, Math.min(collisionStep, 3));
+  const segmentOverlap = matchesVisual
+    ? railSettings.segmentOverlap ?? 0.18
+    : railSettings.collisionSegmentOverlap ?? railSettings.segmentOverlap ?? 0.18;
   const segmentLimit = activeCourse.loop ? trackPoints.length : trackPoints.length - 1;
 
   for (const side of sides) {
     if (!side.enabled) continue;
 
     for (let i = 0; i < segmentLimit;) {
-      const currentStep = getAdaptiveTracksideSegmentStep(i, collisionStep, minStep);
+      const currentStep = getAdaptiveTracksideSegmentStep(i, collisionStep, minStep, railSettings);
       const nextIndex = activeCourse.loop
         ? (i + currentStep) % trackPoints.length
         : Math.min(i + currentStep, trackPoints.length - 1);
@@ -1726,7 +1738,7 @@ function createGuardRailCollisionLoops(sides, offset, railSettings = {}) {
       const { a, b } = segment;
       const dx = b.x - a.x;
       const dz = b.y - a.y;
-      const length = Math.hypot(dx, dz) + 0.18;
+      const length = Math.hypot(dx, dz) + segmentOverlap;
       if (length < 1) continue;
 
       const angle = Math.atan2(-dz, dx);
@@ -1827,7 +1839,7 @@ function createLowWallLoop(offset, material, options = {}) {
 
   for (let i = 0; i < segmentLimit;) {
     const startIndex = i;
-    const currentStep = getAdaptiveTracksideSegmentStep(i, segmentStep, options.minSegmentStep ?? 1);
+    const currentStep = getAdaptiveTracksideSegmentStep(i, segmentStep, options.minSegmentStep ?? 1, options);
     const nextIndex = activeCourse.loop ? (i + currentStep) % trackPoints.length : Math.min(i + currentStep, trackPoints.length - 1);
     const a = getOffsetTrackPoint(i, getRoadEdgeAwareOffset(offset, i));
     const b = getOffsetTrackPoint(nextIndex, getRoadEdgeAwareOffset(offset, nextIndex));
@@ -1847,7 +1859,7 @@ function createLowWallLoop(offset, material, options = {}) {
   const collisionMinStep = options.collisionMinSegmentStep ?? options.minSegmentStep ?? 1;
   for (let i = 0; i < segmentLimit;) {
     const startIndex = i;
-    const currentStep = getAdaptiveTracksideSegmentStep(i, collisionStep, collisionMinStep);
+    const currentStep = getAdaptiveTracksideSegmentStep(i, collisionStep, collisionMinStep, options);
     const nextIndex = activeCourse.loop ? (i + currentStep) % trackPoints.length : Math.min(i + currentStep, trackPoints.length - 1);
     const a = getOffsetTrackPoint(i, getRoadEdgeAwareOffset(offset, i));
     const b = getOffsetTrackPoint(nextIndex, getRoadEdgeAwareOffset(offset, nextIndex));
@@ -1859,13 +1871,17 @@ function createLowWallLoop(offset, material, options = {}) {
   }
 }
 
-function getAdaptiveTracksideSegmentStep(index, preferredStep = 4, minStep = 1) {
+function getAdaptiveTracksideSegmentStep(index, preferredStep = 4, minStep = 1, options = {}) {
   const step = Math.max(1, Math.floor(preferredStep));
   if (step <= minStep) return step;
 
   const curvature = getTrackCurvature(index);
-  if (curvature > 0.2) return Math.max(1, Math.floor(minStep));
-  if (curvature > 0.08) return Math.max(1, Math.floor(step * 0.5));
+  const hairpinThreshold = options.hairpinCurvatureThreshold ?? 0.2;
+  const bendThreshold = options.bendCurvatureThreshold ?? 0.08;
+  const hairpinStep = options.hairpinSegmentStep ?? minStep;
+  const bendScale = options.bendSegmentScale ?? 0.5;
+  if (curvature > hairpinThreshold) return Math.max(1, Math.floor(hairpinStep));
+  if (curvature > bendThreshold) return Math.max(1, Math.floor(step * bendScale));
   return step;
 }
 
@@ -5838,6 +5854,56 @@ function createRibbonMesh(width, y, material, centerOffset = 0, crossSegments = 
     for (let column = 0; column < columns; column += 1) {
       const t = column / (columns - 1);
       const lateralOffset = THREE.MathUtils.lerp(sampleWidth / 2, -sampleWidth / 2, t);
+      const sample = center.clone().addScaledVector(normal, lateralOffset);
+
+      vertices.push(sample.x, getTrackElevation(sample.x, sample.y) + y, sample.y);
+      uvs.push(t, distance / 12);
+    }
+  }
+
+  const count = trackPoints.length;
+  const segmentCount = activeCourse.loop ? count : count - 1;
+  for (let i = 0; i < segmentCount; i += 1) {
+    const next = activeCourse.loop ? (i + 1) % count : i + 1;
+
+    for (let column = 0; column < columns - 1; column += 1) {
+      const a = i * columns + column;
+      const b = i * columns + column + 1;
+      const c = next * columns + column;
+      const d = next * columns + column + 1;
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  return new THREE.Mesh(geometry, material);
+}
+
+function createSurfacePaintRibbonMesh(width, y, material, getCenterOffset, crossSegments = 2) {
+  const vertices = [];
+  const uvs = [];
+  const indices = [];
+  let distance = 0;
+  let previous = null;
+  const columns = Math.max(2, crossSegments + 1);
+
+  for (let i = 0; i < trackPoints.length; i += 1) {
+    const point = trackPoints[i];
+    const normal = getTrackNormal(i);
+    const centerOffset = getCenterOffset(i);
+    const center = point.clone().addScaledVector(normal, getRoadEdgeAwareOffset(centerOffset, i));
+
+    if (previous) distance += center.distanceTo(previous);
+    previous = center;
+
+    for (let column = 0; column < columns; column += 1) {
+      const t = column / (columns - 1);
+      const lateralOffset = THREE.MathUtils.lerp(width / 2, -width / 2, t);
       const sample = center.clone().addScaledVector(normal, lateralOffset);
 
       vertices.push(sample.x, getTrackElevation(sample.x, sample.y) + y, sample.y);

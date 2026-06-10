@@ -1,52 +1,105 @@
+function pushPoint(points, x, z) {
+  const last = points[points.length - 1];
+  if (last && Math.hypot(last[0] - x, last[1] - z) < 0.001) return;
+  points.push([Number(x.toFixed(3)), Number(z.toFixed(3))]);
+}
+
+function pushArc(points, centerX, centerZ, radius, startDeg, endDeg, steps) {
+  const start = (startDeg * Math.PI) / 180;
+  const end = (endDeg * Math.PI) / 180;
+
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const angle = start + (end - start) * t;
+    pushPoint(
+      points,
+      centerX + Math.cos(angle) * radius,
+      centerZ + Math.sin(angle) * radius,
+    );
+  }
+}
+
+function buildMonteAkinaControlPoints() {
+  const points = [];
+
+  pushPoint(points, -720, 940);
+  pushPoint(points, -665, 835);
+  pushPoint(points, -505, 735);
+  pushPoint(points, 470, 720);
+  pushArc(points, 470, 635, 85, 90, -90, 12);
+  pushPoint(points, -540, 550);
+  pushArc(points, -540, 465, 85, 90, 270, 12);
+  pushPoint(points, 430, 380);
+  pushArc(points, 430, 300, 80, 90, -90, 12);
+  pushPoint(points, -460, 220);
+  pushArc(points, -460, 140, 80, 90, 270, 12);
+  pushPoint(points, 225, 60);
+  pushArc(points, 225, -25, 85, 90, -90, 12);
+  pushPoint(points, -520, -110);
+  pushArc(points, -520, -200, 90, 90, 270, 14);
+  pushPoint(points, 360, -290);
+  pushArc(points, 360, -375, 85, 90, -90, 12);
+  pushPoint(points, -260, -460);
+  pushPoint(points, -120, -570);
+  pushPoint(points, 80, -650);
+  pushPoint(points, 280, -730);
+  pushPoint(points, 520, -850);
+  pushPoint(points, 700, -960);
+
+  return points;
+}
+
 export const MAP_1 = {
   id: "map1",
   name: "Monte Akina",
-  referenceName: "Monte Akina technical downhill",
+  referenceName: "Monte Akina asphalt downhill rebuild",
   menuLabel: "Monte Akina",
   distanceLabel: "7.552 km",
-  turnCount: 50,
-  cornerLabel: "50+ technical corners",
+  turnCount: 34,
+  cornerLabel: "curved asphalt hairpins",
   environment: "mountain",
   loop: false,
   curveType: "centripetal",
-  curveTension: 0.08,
+  curveTension: 0.18,
   samples: 980,
   terrainSize: 3600,
   roadWidth: 8.8,
   shoulderWidth: 0,
   maxPixelRatio: 1.5,
   disableRoadShoulders: true,
+  disableRaggedRoadEdge: true,
   spawnOffset: 3,
   minCompletionTime: 12000,
-  checkpoints: [0.22, 0.43, 0.76],
+  checkpoints: [0.22, 0.46, 0.74],
   miniMapScale: 0.48,
-  cornerRoundness: 18,
-  cornerRoundThreshold: 174,
+  cornerRoundness: 0,
   mapGraphicDistanceMeters: 7552,
   sectionDistancesMeters: [1680, 1692, 1884, 2026],
   technicalSpecs: {
     length: "7.552 km",
     elevation: "500 meters",
-    corners: "Over 50 technical corners",
-    surface: "Well-maintained asphalt",
+    corners: "Smooth curved hairpins",
+    surface: "Asphalt road with grass outside",
     difficulty: "Very High",
     type: "Technical downhill",
   },
   keyPoints: [
-    { label: "1", name: "Lower S and hairpin", fraction: 0.14 },
-    { label: "2", name: "Diagonal uphill straight", fraction: 0.32 },
-    { label: "3", name: "The C-Curve", fraction: 0.47 },
-    { label: "4", name: "Five consecutive curves", fraction: 0.68 },
-    { label: "5", name: "Final upper S", fraction: 0.9 },
+    { label: "1", name: "Upper asphalt approach", fraction: 0.12 },
+    { label: "2", name: "Curved switchbacks", fraction: 0.32 },
+    { label: "3", name: "Middle hairpin rhythm", fraction: 0.52 },
+    { label: "4", name: "Lower forest sweeps", fraction: 0.74 },
+    { label: "5", name: "Final downhill run", fraction: 0.9 },
   ],
   cornerMarkers: [
     { label: "1", fraction: 0.13 },
     { label: "2", fraction: 0.32 },
-    { label: "3", fraction: 0.47 },
-    { label: "4", fraction: 0.7 },
+    { label: "3", fraction: 0.52 },
+    { label: "4", fraction: 0.74 },
   ],
   asphalt: {
-    base: "#222528",
+    procedural: true,
+    base: "#202326",
+    color: 0x222528,
     fleckMin: 18,
     fleckRange: 42,
     patchColor: "rgba(54, 58, 56, 0.32)",
@@ -55,22 +108,33 @@ export const MAP_1 = {
     repeat: 66,
   },
   shoulder: {
-    dirt: "#71654b",
+    dirt: "#527a3f",
     grass: "#527a3f",
   },
+  racingLine: {
+    enabled: true,
+    width: 0.34,
+    amplitude: 1.05,
+    frequency: 7,
+    color: 0xe0322b,
+    opacity: 0.52,
+    surfaceLift: 0.012,
+  },
   guardRails: {
-    offset: 0.95,
-    segmentStep: 3,
-    minSegmentStep: 2,
-    collisionStep: 14,
-    collisionMinSegmentStep: 4,
-    postStep: 14,
-    minRoadEdgeClearance: 0.85,
-    localClearanceSamples: 4,
-    segmentOverlap: 0.46,
+    offset: 0.58,
+    segmentStep: 4,
+    minSegmentStep: 1,
+    collisionMatchesVisual: true,
+    postStep: 12,
+    minRoadEdgeClearance: 0.22,
+    localClearanceSamples: 3,
+    segmentOverlap: 0.12,
     lowerRailScale: 0.98,
-    maxClearancePush: 7,
-    clearancePushSteps: [0, 2, 4, 7],
+    maxClearancePush: 0,
+    clearancePushSteps: [0],
+    hairpinCurvatureThreshold: 0.12,
+    bendCurvatureThreshold: 0.045,
+    bendSegmentScale: 0.45,
     sides: { left: true, right: true },
   },
   vegetation: {
@@ -102,73 +166,5 @@ export const MAP_1 = {
   elevationBounds: { min: -26, max: 40 },
   sun: { x: -92, y: 125, z: -48 },
   fogDensity: 0.0034,
-  controlPoints: [
-    [-641, 849],
-    [-614, 755],
-    [-590, 657],
-    [-554, 544],
-    [-500, 454],
-    [-573, 384],
-    [-671, 294],
-    [-625, 221],
-    [-530, 289],
-    [-430, 389],
-    [-413, 479],
-    [-362, 417],
-    [-413, 319],
-    [-465, 257],
-    [-439, 173],
-    [-389, 108],
-    [-370, 29],
-    [-323, 22],
-    [-352, 113],
-    [-384, 192],
-    [-306, 108],
-    [-214, 44],
-    [-127, -29],
-    [-32, -102],
-    [51, -170],
-    [-51, -225],
-    [-192, -243],
-    [-338, -230],
-    [-417, -287],
-    [-380, -370],
-    [-243, -394],
-    [-97, -370],
-    [44, -352],
-    [170, -398],
-    [236, -344],
-    [74, -276],
-    [284, -304],
-    [182, -466],
-    [4, -530],
-    [-65, -573],
-    [-116, -620],
-    [-131, -700],
-    [-127, -791],
-    [-90, -797],
-    [-84, -713],
-    [-51, -707],
-    [-46, -797],
-    [-4, -817],
-    [10, -746],
-    [44, -758],
-    [29, -863],
-    [90, -924],
-    [22, -975],
-    [-19, -1034],
-    [108, -1036],
-    [262, -1012],
-    [314, -988],
-    [314, -924],
-    [247, -882],
-    [262, -820],
-    [348, -817],
-    [398, -758],
-    [479, -750],
-    [544, -882],
-    [599, -778],
-    [620, -778],
-    [700, -852],
-  ],
+  controlPoints: buildMonteAkinaControlPoints(),
 };
