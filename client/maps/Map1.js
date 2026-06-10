@@ -4,47 +4,80 @@ function pushPoint(points, x, z) {
   points.push([Number(x.toFixed(3)), Number(z.toFixed(3))]);
 }
 
-function pushArc(points, centerX, centerZ, radius, startDeg, endDeg, steps) {
-  const start = (startDeg * Math.PI) / 180;
-  const end = (endDeg * Math.PI) / 180;
-
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps;
-    const angle = start + (end - start) * t;
-    pushPoint(
-      points,
-      centerX + Math.cos(angle) * radius,
-      centerZ + Math.sin(angle) * radius,
-    );
+function pushPoints(points, entries) {
+  for (const [x, z] of entries) {
+    pushPoint(points, x, z);
   }
 }
 
 function buildMonteAkinaControlPoints() {
   const points = [];
 
-  pushPoint(points, -720, 940);
-  pushPoint(points, -665, 835);
-  pushPoint(points, -505, 735);
-  pushPoint(points, 470, 720);
-  pushArc(points, 470, 635, 85, 90, -90, 12);
-  pushPoint(points, -540, 550);
-  pushArc(points, -540, 465, 85, 90, 270, 12);
-  pushPoint(points, 430, 380);
-  pushArc(points, 430, 300, 80, 90, -90, 12);
-  pushPoint(points, -460, 220);
-  pushArc(points, -460, 140, 80, 90, 270, 12);
-  pushPoint(points, 225, 60);
-  pushArc(points, 225, -25, 85, 90, -90, 12);
-  pushPoint(points, -520, -110);
-  pushArc(points, -520, -200, 90, 90, 270, 14);
-  pushPoint(points, 360, -290);
-  pushArc(points, 360, -375, 85, 90, -90, 12);
-  pushPoint(points, -260, -460);
-  pushPoint(points, -120, -570);
-  pushPoint(points, 80, -650);
-  pushPoint(points, 280, -730);
-  pushPoint(points, 520, -850);
-  pushPoint(points, 700, -960);
+  pushPoints(points, [
+    [-660, 980],
+    [-625, 850],
+    [-575, 715],
+    [-500, 595],
+    [-420, 505],
+    [-485, 405],
+    [-625, 330],
+    [-700, 215],
+    [-642, 112],
+    [-510, 160],
+    [-382, 305],
+    [-286, 438],
+    [-196, 392],
+    [-248, 250],
+    [-212, 132],
+    [-94, 170],
+    [-42, 48],
+    [-118, -36],
+    [-286, -44],
+    [-500, -42],
+    [-646, -104],
+    [-694, -214],
+    [-608, -292],
+    [-428, -260],
+    [-244, -206],
+    [-96, -246],
+    [68, -188],
+    [232, -186],
+    [356, -258],
+    [462, -208],
+    [382, -106],
+    [226, -72],
+    [84, -98],
+    [12, -178],
+    [116, -272],
+    [268, -300],
+    [342, -382],
+    [298, -474],
+    [174, -464],
+    [118, -362],
+    [38, -398],
+    [64, -510],
+    [182, -530],
+    [138, -624],
+    [6, -584],
+    [-80, -676],
+    [-22, -798],
+    [130, -768],
+    [268, -650],
+    [394, -558],
+    [512, -650],
+    [460, -772],
+    [314, -822],
+    [142, -852],
+    [12, -928],
+    [116, -1036],
+    [284, -988],
+    [394, -846],
+    [528, -804],
+    [636, -914],
+    [568, -1036],
+    [708, -1016],
+    [816, -930],
+  ]);
 
   return points;
 }
@@ -52,25 +85,25 @@ function buildMonteAkinaControlPoints() {
 export const MAP_1 = {
   id: "map1",
   name: "Monte Akina",
-  referenceName: "Monte Akina asphalt downhill rebuild",
+  referenceName: "Monte Akina photo-matched steep downhill",
   menuLabel: "Monte Akina",
   distanceLabel: "7.552 km",
-  turnCount: 34,
-  cornerLabel: "curved asphalt hairpins",
+  turnCount: 54,
+  cornerLabel: "50+ technical corners",
   environment: "mountain",
   loop: false,
   curveType: "centripetal",
-  curveTension: 0.18,
-  samples: 980,
-  terrainSize: 3600,
-  roadWidth: 8.8,
+  curveTension: 0.12,
+  samples: 1120,
+  terrainSize: 3800,
+  roadWidth: 8.6,
   shoulderWidth: 0,
   maxPixelRatio: 1.5,
   disableRoadShoulders: true,
   disableRaggedRoadEdge: true,
   spawnOffset: 3,
   minCompletionTime: 12000,
-  checkpoints: [0.22, 0.46, 0.74],
+  checkpoints: [0.2, 0.46, 0.72],
   miniMapScale: 0.48,
   cornerRoundness: 0,
   mapGraphicDistanceMeters: 7552,
@@ -78,23 +111,23 @@ export const MAP_1 = {
   technicalSpecs: {
     length: "7.552 km",
     elevation: "500 meters",
-    corners: "Smooth curved hairpins",
+    corners: "Over 50 technical corners",
     surface: "Asphalt road with grass outside",
     difficulty: "Very High",
-    type: "Technical downhill",
+    type: "Steep technical downhill",
   },
   keyPoints: [
-    { label: "1", name: "Upper asphalt approach", fraction: 0.12 },
-    { label: "2", name: "Curved switchbacks", fraction: 0.32 },
-    { label: "3", name: "Middle hairpin rhythm", fraction: 0.52 },
-    { label: "4", name: "Lower forest sweeps", fraction: 0.74 },
-    { label: "5", name: "Final downhill run", fraction: 0.9 },
+    { label: "1", name: "Start downhill and S hairpin", fraction: 0.12 },
+    { label: "2", name: "Long mid-course straight", fraction: 0.34 },
+    { label: "3", name: "Checkpoint snake corners", fraction: 0.52 },
+    { label: "4", name: "Lower rhythm section", fraction: 0.72 },
+    { label: "5", name: "Final start-finish sweeps", fraction: 0.9 },
   ],
   cornerMarkers: [
     { label: "1", fraction: 0.13 },
-    { label: "2", fraction: 0.32 },
-    { label: "3", fraction: 0.52 },
-    { label: "4", fraction: 0.74 },
+    { label: "2", fraction: 0.34 },
+    { label: "3", fraction: 0.53 },
+    { label: "4", fraction: 0.77 },
   ],
   asphalt: {
     procedural: true,
@@ -105,7 +138,7 @@ export const MAP_1 = {
     patchColor: "rgba(54, 58, 56, 0.32)",
     tireColor: "rgba(8, 9, 9, 0.2)",
     crackColor: "rgba(8, 8, 8, 0.22)",
-    repeat: 66,
+    repeat: 74,
   },
   shoulder: {
     dirt: "#527a3f",
@@ -113,11 +146,11 @@ export const MAP_1 = {
   },
   racingLine: {
     enabled: true,
-    width: 0.34,
-    amplitude: 1.05,
-    frequency: 7,
+    width: 0.32,
+    amplitude: 0.72,
+    frequency: 10,
     color: 0xe0322b,
-    opacity: 0.52,
+    opacity: 0.5,
     surfaceLift: 0.012,
   },
   guardRails: {
@@ -132,9 +165,9 @@ export const MAP_1 = {
     lowerRailScale: 0.98,
     maxClearancePush: 0,
     clearancePushSteps: [0],
-    hairpinCurvatureThreshold: 0.12,
-    bendCurvatureThreshold: 0.045,
-    bendSegmentScale: 0.45,
+    hairpinCurvatureThreshold: 0.115,
+    bendCurvatureThreshold: 0.04,
+    bendSegmentScale: 0.42,
     sides: { left: true, right: true },
   },
   vegetation: {
@@ -152,18 +185,25 @@ export const MAP_1 = {
     backdropTint: 0x75836b,
   },
   elevationAxis: { x: 0.2, z: -1 },
-  elevationScale: 4.2,
-  ridgeScale: 1.18,
+  elevationScale: 5.2,
+  elevationClampSoftness: 2.1,
+  ridgeScale: 1.24,
   downhillProfile: {
-    startElevation: 36,
-    finishElevation: -22,
+    startElevation: 54,
+    finishElevation: -36,
     realElevationMeters: 500,
-    ridgeInfluence: 0.22,
-    shoulderInfluence: 0.34,
-    featureInfluence: 0.38,
-    offRoadRippleScale: 0.42,
+    progressPower: 0.88,
+    ridgeInfluence: 0.24,
+    shoulderInfluence: 0.36,
+    featureInfluence: 0.42,
+    offRoadRippleScale: 0.44,
   },
-  elevationBounds: { min: -26, max: 40 },
+  elevationFeatures: [
+    { x: -475, z: 520, radiusX: 190, radiusZ: 240, height: 5.5 },
+    { x: 120, z: -380, radiusX: 260, radiusZ: 180, height: -6.2 },
+    { x: 480, z: -840, radiusX: 230, radiusZ: 230, height: -5.4 },
+  ],
+  elevationBounds: { min: -42, max: 60 },
   sun: { x: -92, y: 125, z: -48 },
   fogDensity: 0.0034,
   controlPoints: buildMonteAkinaControlPoints(),

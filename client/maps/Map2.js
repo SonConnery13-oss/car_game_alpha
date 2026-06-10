@@ -4,52 +4,82 @@ function pushPoint(points, x, z) {
   points.push([Number(x.toFixed(3)), Number(z.toFixed(3))]);
 }
 
-function pushArc(points, centerX, centerZ, radius, startDeg, endDeg, steps) {
-  const start = (startDeg * Math.PI) / 180;
-  const end = (endDeg * Math.PI) / 180;
-
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps;
-    const angle = start + (end - start) * t;
-    pushPoint(
-      points,
-      centerX + Math.cos(angle) * radius,
-      centerZ + Math.sin(angle) * radius,
-    );
+function pushPoints(points, entries) {
+  for (const [x, z] of entries) {
+    pushPoint(points, x, z);
   }
 }
 
 function buildIrohazakaControlPoints() {
   const points = [];
 
-  pushPoint(points, -690, 940);
-  pushPoint(points, -600, 805);
-  pushPoint(points, -455, 705);
-  pushPoint(points, -430, 620);
-  pushPoint(points, 430, 620);
-  pushArc(points, 430, 550, 70, 90, -90, 12);
-  pushPoint(points, -430, 480);
-  pushArc(points, -430, 410, 70, 90, 270, 12);
-  pushPoint(points, 405, 340);
-  pushArc(points, 405, 270, 70, 90, -90, 12);
-  pushPoint(points, -405, 200);
-  pushArc(points, -405, 130, 70, 90, 270, 12);
-  pushPoint(points, 430, 60);
-  pushArc(points, 430, -10, 70, 90, -90, 12);
-  pushPoint(points, -390, -80);
-  pushArc(points, -390, -150, 70, 90, 270, 12);
-  pushPoint(points, 410, -220);
-  pushArc(points, 410, -290, 70, 90, -90, 12);
-  pushPoint(points, -430, -360);
-  pushArc(points, -430, -430, 70, 90, 270, 12);
-  pushPoint(points, 390, -500);
-  pushArc(points, 390, -570, 70, 90, -90, 12);
-  pushPoint(points, -335, -640);
-  pushArc(points, -335, -710, 70, 90, 270, 12);
-  pushPoint(points, -170, -795);
-  pushPoint(points, 80, -855);
-  pushPoint(points, 305, -815);
-  pushPoint(points, 520, -730);
+  pushPoints(points, [
+    [-1000, 860],
+    [-925, 760],
+    [-820, 575],
+    [-704, 392],
+    [-580, 230],
+    [-444, 72],
+    [-330, -56],
+    [-218, -150],
+    [-244, -252],
+    [-358, -294],
+    [-462, -230],
+    [-424, -110],
+    [-296, -22],
+    [-174, -86],
+    [-98, -210],
+    [18, -306],
+    [156, -392],
+    [298, -426],
+    [424, -396],
+    [416, -312],
+    [260, -306],
+    [90, -362],
+    [-12, -310],
+    [74, -238],
+    [238, -258],
+    [408, -232],
+    [524, -178],
+    [430, -124],
+    [258, -144],
+    [104, -206],
+    [170, -126],
+    [342, -120],
+    [514, -82],
+    [596, -24],
+    [464, 24],
+    [298, 4],
+    [364, 86],
+    [526, 70],
+    [632, 138],
+    [526, 206],
+    [370, 188],
+    [446, 272],
+    [606, 294],
+    [704, 360],
+    [646, 458],
+    [518, 428],
+    [542, 318],
+    [668, 290],
+    [802, 358],
+    [766, 478],
+    [622, 520],
+    [728, 596],
+    [900, 600],
+    [1032, 664],
+    [966, 760],
+    [828, 734],
+    [854, 632],
+    [996, 626],
+    [1148, 684],
+    [1288, 676],
+    [1438, 704],
+    [1548, 800],
+    [1486, 910],
+    [1348, 860],
+    [1248, 794],
+  ]);
 
   return points;
 }
@@ -57,17 +87,17 @@ function buildIrohazakaControlPoints() {
 export const MAP_2 = {
   id: "map2",
   name: "Paso Irohazaka",
-  referenceName: "Paso Irohazaka curved asphalt hairpins",
+  referenceName: "Paso Irohazaka photo-matched consecutive hairpins",
   menuLabel: "Paso Irohazaka",
   distanceLabel: "5.116 km",
-  turnCount: 28,
-  cornerLabel: "curved hairpins",
+  turnCount: 48,
+  cornerLabel: "48 hairpins",
   environment: "mountain",
   loop: false,
   curveType: "centripetal",
-  curveTension: 0.18,
-  samples: 920,
-  terrainSize: 3600,
+  curveTension: 0.1,
+  samples: 1060,
+  terrainSize: 3900,
   roadWidth: 8.4,
   shoulderWidth: 0,
   maxPixelRatio: 1.5,
@@ -75,30 +105,30 @@ export const MAP_2 = {
   disableRaggedRoadEdge: true,
   spawnOffset: 3,
   minCompletionTime: 10000,
-  checkpoints: [0.34, 0.55, 0.76],
-  miniMapScale: 0.44,
+  checkpoints: [0.28, 0.46, 0.68],
+  miniMapScale: 0.41,
   cornerRoundness: 0,
   mapGraphicDistanceMeters: 5116,
   sectionDistancesMeters: [1320, 1332, 1240, 1224],
   technicalSpecs: {
     length: "5.116 km",
     elevation: "440 meters",
-    corners: "Curved consecutive hairpins",
+    corners: "48 hairpin turns",
     surface: "Asphalt road with grass outside",
     difficulty: "Extreme",
     type: "Consecutive hairpins",
   },
   keyPoints: [
-    { label: "1", name: "Long lower approach", fraction: 0.12 },
-    { label: "2", name: "Central curved hairpins", fraction: 0.42 },
-    { label: "3", name: "Nikko Viewpoint technical drop", fraction: 0.6 },
-    { label: "4", name: "Right-side hairpin chain", fraction: 0.78 },
-    { label: "5", name: "Final downhill run", fraction: 0.92 },
+    { label: "1", name: "Long start climb", fraction: 0.12 },
+    { label: "2", name: "Upper consecutive hairpins", fraction: 0.4 },
+    { label: "3", name: "Tight technical drop", fraction: 0.58 },
+    { label: "4", name: "Right-side three-pin complex", fraction: 0.75 },
+    { label: "5", name: "Final finish sweep", fraction: 0.92 },
   ],
   cornerMarkers: [
     { label: "1", fraction: 0.12 },
     { label: "2", fraction: 0.42 },
-    { label: "3", fraction: 0.62 },
+    { label: "3", fraction: 0.6 },
     { label: "4", fraction: 0.82 },
   ],
   asphalt: {
@@ -110,7 +140,7 @@ export const MAP_2 = {
     patchColor: "rgba(58, 60, 56, 0.28)",
     tireColor: "rgba(6, 7, 7, 0.22)",
     crackColor: "rgba(7, 7, 7, 0.24)",
-    repeat: 70,
+    repeat: 76,
   },
   shoulder: {
     dirt: "#4d7440",
@@ -118,11 +148,11 @@ export const MAP_2 = {
   },
   racingLine: {
     enabled: true,
-    width: 0.34,
-    amplitude: 1,
-    frequency: 8,
+    width: 0.32,
+    amplitude: 0.66,
+    frequency: 12,
     color: 0xe0322b,
-    opacity: 0.52,
+    opacity: 0.5,
     surfaceLift: 0.012,
   },
   guardRails: {
@@ -137,9 +167,9 @@ export const MAP_2 = {
     lowerRailScale: 0.98,
     maxClearancePush: 0,
     clearancePushSteps: [0],
-    hairpinCurvatureThreshold: 0.11,
-    bendCurvatureThreshold: 0.04,
-    bendSegmentScale: 0.45,
+    hairpinCurvatureThreshold: 0.105,
+    bendCurvatureThreshold: 0.036,
+    bendSegmentScale: 0.4,
     sides: { left: true, right: true },
   },
   vegetation: {
@@ -157,18 +187,25 @@ export const MAP_2 = {
     backdropTint: 0x788166,
   },
   elevationAxis: { x: 0.84, z: -0.46 },
-  elevationScale: 4.1,
-  ridgeScale: 1.04,
+  elevationScale: 4.6,
+  elevationClampSoftness: 2,
+  ridgeScale: 1.08,
   downhillProfile: {
-    startElevation: 34,
-    finishElevation: -22,
+    startElevation: 42,
+    finishElevation: -30,
     realElevationMeters: 440,
+    progressPower: 0.96,
     ridgeInfluence: 0.2,
     shoulderInfluence: 0.32,
     featureInfluence: 0.36,
     offRoadRippleScale: 0.4,
   },
-  elevationBounds: { min: -26, max: 38 },
+  elevationFeatures: [
+    { x: 210, z: -360, radiusX: 360, radiusZ: 180, height: 4.8 },
+    { x: 560, z: 200, radiusX: 250, radiusZ: 220, height: -4.2 },
+    { x: 1180, z: 720, radiusX: 340, radiusZ: 220, height: -3.6 },
+  ],
+  elevationBounds: { min: -34, max: 46 },
   sun: { x: -72, y: 118, z: -86 },
   fogDensity: 0.0036,
   controlPoints: buildIrohazakaControlPoints(),
